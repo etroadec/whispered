@@ -55,8 +55,9 @@ struct RecordingPopup: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(20)
-        .frame(width: 300, height: 150)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .frame(minWidth: 280)
     }
 }
 

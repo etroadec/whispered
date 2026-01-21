@@ -11,6 +11,10 @@ struct SettingsView: View {
     @State private var statusMessage = ""
     @State private var refreshTrigger = false
 
+    private var isAppInstalled: Bool {
+        Bundle.main.bundlePath.hasPrefix("/Applications")
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -43,8 +47,10 @@ struct SettingsView: View {
                             isAvailable: WhisperService.shared.isModelAvailable(model),
                             isLoading: loadingModel == model,
                             onSelect: { selectModel(model) },
-                            onDownload: { downloadModel(model) }
+                            onDownload: { downloadModel(model) },
+                            onDelete: { deleteModel(model) }
                         )
+                        .id("\(model.rawValue)-\(refreshTrigger)")
                     }
 
                     if !statusMessage.isEmpty {
@@ -85,10 +91,19 @@ struct SettingsView: View {
                 }
 
                 Section("Système") {
-                    Toggle("Lancer au démarrage", isOn: $autoLaunch)
-                        .onChange(of: autoLaunch) { _, newValue in
-                            setAutoLaunch(enabled: newValue)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Lancer au démarrage", isOn: $autoLaunch)
+                            .onChange(of: autoLaunch) { _, newValue in
+                                setAutoLaunch(enabled: newValue)
+                            }
+                            .disabled(!isAppInstalled)
+
+                        if !isAppInstalled {
+                            Text("Disponible uniquement si l'app est dans /Applications")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
+                    }
 
                     HStack {
                         Text("Dossier des modèles")
@@ -185,8 +200,24 @@ struct SettingsView: View {
         }
     }
 
+    private func deleteModel(_ model: WhisperModel) {
+        let result = WhisperService.shared.deleteModel(model)
+        switch result {
+        case .success:
+            statusMessage = "Modèle \(model.rawValue) supprimé"
+            refreshTrigger.toggle()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                statusMessage = ""
+            }
+        case .failure(let error):
+            statusMessage = "Erreur: \(error.localizedDescription)"
+        }
+    }
+
     private func setAutoLaunch(enabled: Bool) {
-        // TODO: Implement with SMAppService
+        // Note: SMAppService requires the app to be in /Applications
+        // For development, this setting is saved but won't take effect
+        // until the app is properly installed
     }
 
     private func openModelsFolder() {
@@ -203,6 +234,9 @@ struct ModelRow: View {
     let isLoading: Bool
     let onSelect: () -> Void
     let onDownload: () -> Void
+    let onDelete: () -> Void
+
+    @State private var showDeleteConfirmation = false
 
     var body: some View {
         HStack {
@@ -227,9 +261,15 @@ struct ModelRow: View {
                     }
                 }
 
-                Text(modelDescription(model))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Text(modelDescription(model))
+                    if isAvailable, let size = WhisperService.shared.getModelSize(model) {
+                        Text("•")
+                        Text(size)
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
 
             Spacer()
@@ -239,12 +279,23 @@ struct ModelRow: View {
                 ProgressView()
                     .scaleEffect(0.7)
             } else if isAvailable {
-                if !isSelected {
-                    Button("Utiliser") {
-                        onSelect()
+                HStack(spacing: 8) {
+                    if !isSelected {
+                        Button("Utiliser") {
+                            onSelect()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Supprimer le modèle")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             } else {
                 Button("Télécharger") {
@@ -262,6 +313,14 @@ struct ModelRow: View {
             } else if !isAvailable {
                 onDownload()
             }
+        }
+        .alert("Supprimer le modèle ?", isPresented: $showDeleteConfirmation) {
+            Button("Annuler", role: .cancel) { }
+            Button("Supprimer", role: .destructive) {
+                onDelete()
+            }
+        } message: {
+            Text("Le modèle \(model.rawValue.capitalized) sera supprimé. Vous pourrez le retélécharger plus tard.")
         }
     }
 

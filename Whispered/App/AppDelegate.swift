@@ -19,6 +19,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        cleanup()
+    }
+
+    private func cleanup() {
+        // Stop hotkey manager first
+        hotkeyManager?.stop()
+        hotkeyManager = nil
+
+        // Stop any ongoing recording
+        AudioRecorder.shared.cleanup()
+
+        // Release whisper context
+        WhisperService.shared.cleanup()
+
+        // Close popover
+        popover?.close()
+        popover = nil
+
+        // Close settings window
+        settingsWindow?.close()
+        settingsWindow = nil
+
+        // Remove status item
+        if let statusItem = statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        statusItem = nil
+    }
+
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -78,8 +108,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupPopover() {
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 300, height: 150)
-        popover?.behavior = .transient
+        popover?.contentSize = NSSize(width: 280, height: 180)
+        popover?.behavior = .semitransient
+        popover?.animates = true
         popover?.contentViewController = NSHostingController(rootView: RecordingPopup(state: recordingState))
     }
 

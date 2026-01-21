@@ -258,9 +258,56 @@ class WhisperService {
         downloadModel(currentModel, completion: completion)
     }
 
-    deinit {
+    // MARK: - Model Delete
+
+    func deleteModel(_ model: WhisperModel) -> Result<Void, WhisperError> {
+        // Cannot delete the currently active model
+        if model == currentModel && isModelLoaded {
+            return .failure(.cannotDeleteActiveModel)
+        }
+
+        let modelFile = modelPath(for: model)
+        let coreMLDir = modelsDirectory.appendingPathComponent(model.coreMLFileName)
+
+        do {
+            // Delete main model file
+            if FileManager.default.fileExists(atPath: modelFile.path) {
+                try FileManager.default.removeItem(at: modelFile)
+            }
+
+            // Delete CoreML model if exists
+            if FileManager.default.fileExists(atPath: coreMLDir.path) {
+                try FileManager.default.removeItem(at: coreMLDir)
+            }
+
+            return .success(())
+        } catch {
+            return .failure(.deleteFailed(error.localizedDescription))
+        }
+    }
+
+    func getModelSize(_ model: WhisperModel) -> String? {
+        let modelFile = modelPath(for: model)
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: modelFile.path),
+              let size = attributes[.size] as? Int64 else {
+            return nil
+        }
+
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+
+    func cleanup() {
         if let ctx = context {
             whisper_free(ctx)
+            context = nil
+            isModelLoaded = false
         }
+    }
+
+    deinit {
+        cleanup()
     }
 }

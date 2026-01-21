@@ -20,6 +20,8 @@ enum WhisperError: LocalizedError {
     case transcriptionFailed
     case audioReadFailed
     case downloadFailed(String)
+    case cannotDeleteActiveModel
+    case deleteFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +35,10 @@ enum WhisperError: LocalizedError {
             return "Impossible de lire le fichier audio."
         case .downloadFailed(let message):
             return "Téléchargement échoué: \(message)"
+        case .cannotDeleteActiveModel:
+            return "Impossible de supprimer le modèle actif. Changez de modèle d'abord."
+        case .deleteFailed(let message):
+            return "Suppression échouée: \(message)"
         }
     }
 }

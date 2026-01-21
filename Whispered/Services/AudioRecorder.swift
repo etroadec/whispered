@@ -54,6 +54,21 @@ class AudioRecorder: NSObject {
         audioRecorder?.updateMeters()
         return audioRecorder?.averagePower(forChannel: 0) ?? -160
     }
+
+    func cleanup() {
+        if let recorder = audioRecorder {
+            if recorder.isRecording {
+                recorder.stop()
+            }
+            audioRecorder = nil
+        }
+
+        // Clean up temp file
+        if let url = audioURL {
+            try? FileManager.default.removeItem(at: url)
+            audioURL = nil
+        }
+    }
 }
 
 extension AudioRecorder: AVAudioRecorderDelegate {
