@@ -1,0 +1,34 @@
+# Build
+.build/
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Whisper models
+models/*.bin
+*.bin
+
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# IDE
+.idea/
+*.sublime-*
+.vscode/
+
+# Compiled
+*.o
+*.a
+*.dylib
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
