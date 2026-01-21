@@ -13,9 +13,10 @@ class TextInjector {
     }
 
     private func injectViaPasteboard(_ text: String) {
-        // Save current pasteboard content
+        // Save current pasteboard content and change count
         let pasteboard = NSPasteboard.general
         let previousContents = pasteboard.string(forType: .string)
+        let previousChangeCount = pasteboard.changeCount
 
         // Set new content
         pasteboard.clearContents()
@@ -25,10 +26,15 @@ class TextInjector {
         simulatePaste()
 
         // Restore previous content after a delay
+        // But only if pasteboard hasn't been modified by user since our paste
         if let previous = previousContents {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                pasteboard.clearContents()
-                pasteboard.setString(previous, forType: .string)
+                // changeCount increments by 1 for clearContents, +1 for setString = +2 total
+                // Only restore if no external change occurred
+                if pasteboard.changeCount == previousChangeCount + 2 {
+                    pasteboard.clearContents()
+                    pasteboard.setString(previous, forType: .string)
+                }
             }
         }
     }

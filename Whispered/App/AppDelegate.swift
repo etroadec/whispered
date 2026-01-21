@@ -12,11 +12,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         setupPopover()
-        setupHotkeyManager()
-        requestPermissions()
 
         // Hide from Dock
         NSApp.setActivationPolicy(.accessory)
+
+        // Check permissions FIRST, then setup hotkey manager only if we have permission
+        if AXIsProcessTrusted() {
+            print("AppDelegate: Accessibility already granted, setting up hotkey manager")
+            setupHotkeyManager()
+        } else {
+            print("AppDelegate: Accessibility NOT granted, will setup after permission")
+        }
+
+        requestPermissions()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -24,6 +32,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanup() {
+        // Stop accessibility check timer
+        accessibilityCheckTimer?.invalidate()
+        accessibilityCheckTimer = nil
+
         // Stop hotkey manager first
         hotkeyManager?.stop()
         hotkeyManager = nil
@@ -61,7 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
-        let event = NSApp.currentEvent!
+        guard let event = NSApp.currentEvent else { return }
 
         if event.type == .rightMouseUp {
             // Right click - show menu
@@ -115,46 +127,57 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotkeyManager() {
+        // Don't create if already exists
+        guard hotkeyManager == nil else {
+            print("AppDelegate: HotkeyManager already exists")
+            return
+        }
+
         hotkeyManager = HotkeyManager { [weak self] isPressed in
-            DispatchQueue.main.async {
-                if isPressed {
-                    self?.startRecording()
-                } else {
-                    self?.stopRecording()
-                }
+            // Callback is already on main thread (via main run loop)
+            if isPressed {
+                self?.startRecording()
+            } else {
+                self?.stopRecording()
             }
         }
-        hotkeyManager?.start()
+
+        let success = hotkeyManager?.start() ?? false
+        if success {
+            print("AppDelegate: Hotkey manager started successfully")
+            print("AppDelegate: Event tap active = \(hotkeyManager?.isActive() ?? false)")
+        } else {
+            print("AppDelegate: Hotkey manager failed to start")
+            hotkeyManager = nil  // Clean up failed manager
+        }
     }
+
+    private var accessibilityCheckTimer: Timer?
 
     private func requestPermissions() {
-        // Request microphone permission
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if !granted {
-                DispatchQueue.main.async {
-                    self.showPermissionAlert(for: "Microphone")
-                }
-            }
-        }
+        // Request microphone permission (system handles the dialog)
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
 
-        // Check accessibility permission
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        let trusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        if !trusted {
-            print("Accessibility permission required for global hotkey")
+        // For accessibility, just trigger the system prompt if not trusted
+        if !AXIsProcessTrusted() {
+            // Trigger system prompt
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+            _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+
+            // Start polling for permission grant
+            startAccessibilityCheck()
         }
     }
 
-    private func showPermissionAlert(for permission: String) {
-        let alert = NSAlert()
-        alert.messageText = "Permission requise"
-        alert.informativeText = "Whispered a besoin de l'accès au \(permission) pour fonctionner."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Ouvrir les Préférences")
-        alert.addButton(withTitle: "Annuler")
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
+    private func startAccessibilityCheck() {
+        accessibilityCheckTimer?.invalidate()
+        accessibilityCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            if AXIsProcessTrusted() {
+                timer.invalidate()
+                self?.accessibilityCheckTimer = nil
+                print("AppDelegate: Accessibility permission granted!")
+                self?.setupHotkeyManager()
+            }
         }
     }
 

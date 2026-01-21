@@ -36,6 +36,8 @@ enum WhisperModel: String, CaseIterable {
 class WhisperService {
     static let shared = WhisperService()
 
+    // Thread-safe access to whisper context
+    private let contextQueue = DispatchQueue(label: "com.whispered.whisperContext")
     private var context: OpaquePointer?
     private var currentModel: WhisperModel = .base
     private var isModelLoaded = false
@@ -78,24 +80,30 @@ class WhisperService {
             return
         }
 
-        // Unload current model
-        if let ctx = context {
-            whisper_free(ctx)
-            context = nil
-            isModelLoaded = false
-        }
+        contextQueue.async { [weak self] in
+            guard let self = self else { return }
 
-        // Switch to new model
-        currentModel = model
-        UserDefaults.standard.set(model.rawValue, forKey: "selectedModel")
+            // Unload current model
+            if let ctx = self.context {
+                whisper_free(ctx)
+                self.context = nil
+                self.isModelLoaded = false
+            }
 
-        // Load new model
-        loadModel()
+            // Switch to new model
+            self.currentModel = model
+            UserDefaults.standard.set(model.rawValue, forKey: "selectedModel")
 
-        if isModelLoaded {
-            completion(.success(()))
-        } else {
-            completion(.failure(.modelLoadFailed))
+            // Load new model
+            self.loadModel()
+
+            DispatchQueue.main.async {
+                if self.isModelLoaded {
+                    completion(.success(()))
+                } else {
+                    completion(.failure(.modelLoadFailed))
+                }
+            }
         }
     }
 
@@ -131,15 +139,17 @@ class WhisperService {
     }
 
     func transcribe(audioURL: URL, completion: @escaping (Result<String, WhisperError>) -> Void) {
-        guard isModelLoaded, let ctx = context else {
-            completion(.failure(.modelNotFound))
+        // Read audio samples first (doesn't need context lock)
+        guard let samples = self.readAudioSamples(from: audioURL) else {
+            completion(.failure(.audioReadFailed))
             return
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            guard let samples = self.readAudioSamples(from: audioURL) else {
+        // All whisper operations on contextQueue (whisper.cpp is NOT thread-safe)
+        contextQueue.async { [weak self] in
+            guard let self = self, self.isModelLoaded, let ctx = self.context else {
                 DispatchQueue.main.async {
-                    completion(.failure(.audioReadFailed))
+                    completion(.failure(.modelNotFound))
                 }
                 return
             }
@@ -300,14 +310,21 @@ class WhisperService {
     }
 
     func cleanup() {
+        contextQueue.sync {
+            if let ctx = context {
+                whisper_free(ctx)
+                context = nil
+                isModelLoaded = false
+            }
+        }
+    }
+
+    deinit {
+        // Note: deinit is synchronous, cleanup uses sync
         if let ctx = context {
             whisper_free(ctx)
             context = nil
             isModelLoaded = false
         }
-    }
-
-    deinit {
-        cleanup()
     }
 }

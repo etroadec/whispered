@@ -1,4 +1,4 @@
-.PHONY: all clean build run whisper-lib download-model download-coreml xcode bundle install
+.PHONY: all clean build run run-app whisper-lib download-model download-coreml xcode bundle install
 
 # Directories
 WHISPER_DIR = WhisperCpp/whisper.cpp
@@ -70,6 +70,11 @@ bundle: build
 	@echo "==> Creating app bundle..."
 	@./scripts/bundle-app.sh
 
+# Run the bundled app (same identifier as installed version, for testing)
+run-app: bundle
+	@echo "==> Running Whispered.app bundle..."
+	@open .build/release/Whispered.app
+
 # Install to /Applications
 install: bundle
 	@echo "==> Installing Whispered to /Applications..."
@@ -103,7 +108,8 @@ help:
 	@echo "  make build        - Build Swift application"
 	@echo "  make bundle       - Create .app bundle"
 	@echo "  make install      - Install to /Applications"
-	@echo "  make run          - Run the application"
+	@echo "  make run          - Run the application (dev mode)"
+	@echo "  make run-app      - Run the bundled .app (test before install)"
 	@echo "  make download-model   - Download Whisper Base model (ggml)"
 	@echo "  make download-coreml  - Download CoreML encoder (Neural Engine)"
 	@echo "  make download-all     - Download all models"

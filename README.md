@@ -138,9 +138,8 @@ whispered/
 ├── WhisperCpp/               # Wrapper whisper.cpp
 │   ├── whisper.cpp/          # Submodule Git
 │   └── include/              # Headers pour le bridge Swift-C
-├── .claude/                  # Commandes Claude Code
-│   ├── commands/             # /project:build, /project:run, etc.
-│   └── skills/               # Skills spécialisés
+├── Resources/                # Icône de l'application
+├── scripts/                  # Scripts de build (bundle-app.sh)
 ├── Makefile                  # Scripts de build
 ├── Package.swift             # Configuration Swift Package Manager
 └── README.md
@@ -164,16 +163,19 @@ make download-coreml
 ### L'application ne démarre pas
 ```bash
 # Recompiler proprement
-make clean && make
+make clean && make install
 ```
 
 ### Le raccourci clavier ne fonctionne pas
-- Vérifiez les permissions d'accessibilité dans **Préférences Système → Confidentialité → Accessibilité**
-- Ajoutez Whispered à la liste des applications autorisées
+1. Vérifiez les permissions dans **Préférences Système → Confidentialité et Sécurité → Accessibilité**
+2. Ajoutez Whispered.app à la liste et cochez-le
+3. **Redémarrez l'application** après avoir accordé les permissions
+
+> **Note** : L'application doit être signée avec un certificat Apple Development pour que les permissions soient conservées entre les builds. Voir la section Développement.
 
 ### Pas de transcription
 - Vérifiez qu'un modèle est téléchargé (Préférences → section Modèle)
-- Vérifiez les permissions du microphone
+- Vérifiez les permissions du microphone dans **Confidentialité et Sécurité → Microphone**
 
 ### Erreur "Model not found"
 ```bash
@@ -182,19 +184,27 @@ make download-model
 
 ## Développement
 
-### Commandes Claude Code
+### Prérequis pour le développement
 
-Si vous utilisez Claude Code, des commandes sont disponibles :
+Pour que les permissions macOS (Accessibilité, Microphone) soient conservées entre les builds, l'application doit être signée avec un certificat Apple Development :
 
-- `/project:build` - Compiler le projet
-- `/project:run` - Lancer l'application
-- `/project:download-model` - Télécharger le modèle
+```bash
+# Vérifier vos certificats disponibles
+security find-identity -v -p codesigning
 
-### Skills disponibles
+# Le script bundle-app.sh utilisera automatiquement votre certificat
+```
 
-- `whisper-debug` - Diagnostiquer les problèmes de transcription
-- `swift-audio` - Aide au développement audio
-- `macos-menubar` - Patterns pour apps menu bar
+Si vous n'avez pas de certificat, vous pouvez en créer un via Xcode → Settings → Accounts → Manage Certificates.
+
+### Commandes utiles
+
+```bash
+make run          # Lancer en mode développement (exécutable direct)
+make run-app      # Lancer le bundle .app (même comportement qu'installé)
+make install      # Compiler et installer dans /Applications
+make clean        # Nettoyer les fichiers de build
+```
 
 ## Crédits
 

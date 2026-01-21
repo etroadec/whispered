@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Radial gradient from dark purple to black -->
+    <radialGradient id="bgGradient" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#2d1b4e"/>
+      <stop offset="50%" style="stop-color:#1a1025"/>
+      <stop offset="100%" style="stop-color:#0a0510"/>
+    </radialGradient>
+
+    <!-- Glow effect for waveform -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gradient for waveform -->
+    <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#8b5cf6"/>
+      <stop offset="50%" style="stop-color:#a78bfa"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background with rounded corners -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" ry="220" fill="url(#bgGradient)"/>
+
+  <!-- Subtle inner glow -->
+  <rect x="40" y="40" width="944" height="944" rx="190" ry="190"
+        fill="none" stroke="url(#waveGradient)" stroke-width="2" opacity="0.3"/>
+
+  <!-- Waveform bars -->
+  <g filter="url(#glow)" transform="translate(512, 512)">
+    <!-- Center bar (tallest) -->
+    <rect x="-30" y="-180" width="60" height="360" rx="30" fill="url(#waveGradient)"/>
+
+    <!-- Second bars -->
+    <rect x="-130" y="-140" width="50" height="280" rx="25" fill="url(#waveGradient)"/>
+    <rect x="80" y="-140" width="50" height="280" rx="25" fill="url(#waveGradient)"/>
+
+    <!-- Third bars -->
+    <rect x="-220" y="-100" width="45" height="200" rx="22" fill="url(#waveGradient)"/>
+    <rect x="175" y="-100" width="45" height="200" rx="22" fill="url(#waveGradient)"/>
+
+    <!-- Outer bars (shortest) -->
+    <rect x="-300" y="-60" width="40" height="120" rx="20" fill="url(#waveGradient)"/>
+    <rect x="260" y="-60" width="40" height="120" rx="20" fill="url(#waveGradient)"/>
+  </g>
+</svg>

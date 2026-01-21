@@ -1,8 +1,9 @@
 # Build
 .build/
 build/
+lib/
 DerivedData/
-*.xcodeproj/xcuserdata/
+*.xcodeproj/
 *.xcworkspace/xcuserdata/
 
 # macOS
@@ -23,6 +24,9 @@ xcuserdata/
 .idea/
 *.sublime-*
 .vscode/
+
+# Claude Code (personal config)
+.claude/
 
 # Compiled
 *.o

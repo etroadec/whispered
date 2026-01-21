@@ -23,6 +23,12 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # Copy executable
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/"
 
+# Copy icon if exists
+if [ -f "Resources/AppIcon.icns" ]; then
+    cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+    echo "📎 Icon added"
+fi
+
 # Create Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -64,9 +70,18 @@ EOF
 # Create PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
-# Sign the app (ad-hoc for local use)
-echo "🔏 Signing app (ad-hoc)..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+# Copy entitlements
+if [ -f "Whispered.entitlements" ]; then
+    cp "Whispered.entitlements" "$APP_BUNDLE/Contents/Resources/"
+    echo "📜 Entitlements added"
+fi
+
+# Sign the app with Apple Development certificate (stable identity for TCC)
+# This ensures macOS recognizes the app consistently for permissions
+SIGNING_IDENTITY="Apple Development: Edgard Troadec (TQ826VX8L2)"
+
+echo "🔏 Signing app with certificate: $SIGNING_IDENTITY"
+codesign --force --deep --sign "$SIGNING_IDENTITY" --entitlements Whispered.entitlements "$APP_BUNDLE"
 
 echo "✅ App bundle created: $APP_BUNDLE"
 echo ""
