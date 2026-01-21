@@ -31,29 +31,27 @@ brew install cmake
 ### 1. Cloner le dépôt
 
 ```bash
-git clone --recursive https://github.com/votre-username/whispered.git
+git clone --recursive https://github.com/etroadec/whispered.git
 cd whispered
 ```
 
 > **Note** : `--recursive` est important pour télécharger le submodule whisper.cpp
 
-### 2. Compiler l'application
+### 2. Compiler et installer l'application
 
 ```bash
-make
+make install
 ```
 
 Cette commande :
 - Compile whisper.cpp avec support Metal et CoreML
 - Compile l'application Swift
+- Crée le bundle `.app`
+- Installe dans `/Applications`
 
-### 3. Lancer l'application
+L'application apparaîtra dans vos Applications et vous pourrez l'ajouter au démarrage automatique via ses préférences.
 
-```bash
-make run
-```
-
-### 4. Télécharger un modèle
+### 3. Télécharger un modèle
 
 Au premier lancement :
 1. Clic droit sur l'icône dans la barre de menu
@@ -119,7 +117,9 @@ macOS vous demandera ces permissions au premier lancement.
 | `make` | Compile tout (whisper.cpp + app) |
 | `make whisper-lib` | Compile uniquement whisper.cpp |
 | `make build` | Compile l'application Swift |
-| `make run` | Lance l'application |
+| `make bundle` | Crée le bundle `.app` |
+| `make install` | Installe dans `/Applications` |
+| `make run` | Lance l'application (mode développement) |
 | `make download-model` | Télécharge le modèle Base |
 | `make download-coreml` | Télécharge le modèle CoreML Base |
 | `make download-all` | Télécharge Base + CoreML |

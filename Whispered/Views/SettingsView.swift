@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 struct SettingsView: View {
     @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
@@ -215,9 +216,22 @@ struct SettingsView: View {
     }
 
     private func setAutoLaunch(enabled: Bool) {
-        // Note: SMAppService requires the app to be in /Applications
-        // For development, this setting is saved but won't take effect
-        // until the app is properly installed
+        guard isAppInstalled else { return }
+
+        do {
+            let service = SMAppService.mainApp
+            if enabled {
+                try service.register()
+            } else {
+                try service.unregister()
+            }
+        } catch {
+            print("Failed to \(enabled ? "enable" : "disable") auto-launch: \(error)")
+            // Revert the toggle on error
+            DispatchQueue.main.async {
+                autoLaunch = !enabled
+            }
+        }
     }
 
     private func openModelsFolder() {

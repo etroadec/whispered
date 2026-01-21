@@ -1,4 +1,4 @@
-.PHONY: all clean build run whisper-lib download-model download-coreml xcode
+.PHONY: all clean build run whisper-lib download-model download-coreml xcode bundle install
 
 # Directories
 WHISPER_DIR = WhisperCpp/whisper.cpp
@@ -65,6 +65,19 @@ download-coreml:
 download-all: download-model download-coreml
 	@echo "==> All models downloaded!"
 
+# Create app bundle
+bundle: build
+	@echo "==> Creating app bundle..."
+	@./scripts/bundle-app.sh
+
+# Install to /Applications
+install: bundle
+	@echo "==> Installing Whispered to /Applications..."
+	@rm -rf /Applications/Whispered.app
+	@cp -r .build/release/Whispered.app /Applications/
+	@echo "==> Whispered installed to /Applications/Whispered.app"
+	@echo "==> You can now enable 'Launch at startup' in preferences."
+
 # Generate Xcode project
 xcode: whisper-lib
 	@echo "==> Generating Xcode project..."
@@ -88,6 +101,8 @@ help:
 	@echo "  make              - Build everything (with CoreML/Neural Engine)"
 	@echo "  make whisper-lib  - Build whisper.cpp library"
 	@echo "  make build        - Build Swift application"
+	@echo "  make bundle       - Create .app bundle"
+	@echo "  make install      - Install to /Applications"
 	@echo "  make run          - Run the application"
 	@echo "  make download-model   - Download Whisper Base model (ggml)"
 	@echo "  make download-coreml  - Download CoreML encoder (Neural Engine)"
@@ -95,5 +110,8 @@ help:
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make help         - Show this help"
 	@echo ""
+	@echo "Installation:"
+	@echo "  make install      - Build and install to /Applications"
+	@echo ""
 	@echo "For best performance on Apple Silicon:"
-	@echo "  make clean && make && make download-all"
+	@echo "  make clean && make install && make download-all"
