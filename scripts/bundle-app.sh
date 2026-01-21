@@ -76,12 +76,25 @@ if [ -f "Whispered.entitlements" ]; then
     echo "📜 Entitlements added"
 fi
 
-# Sign the app with Apple Development certificate (stable identity for TCC)
-# This ensures macOS recognizes the app consistently for permissions
-SIGNING_IDENTITY="Apple Development: Edgard Troadec (TQ826VX8L2)"
+# Find a valid code signing identity, or fall back to ad-hoc
+# Priority: Apple Development > Apple Distribution > ad-hoc
+SIGNING_IDENTITY=""
 
-echo "🔏 Signing app with certificate: $SIGNING_IDENTITY"
-codesign --force --deep --sign "$SIGNING_IDENTITY" --entitlements Whispered.entitlements "$APP_BUNDLE"
+# Try to find an Apple Development certificate
+DEV_CERT=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+if [ -n "$DEV_CERT" ]; then
+    SIGNING_IDENTITY="$DEV_CERT"
+fi
+
+# Sign the app
+if [ -n "$SIGNING_IDENTITY" ]; then
+    echo "🔏 Signing app with certificate: $SIGNING_IDENTITY"
+    codesign --force --deep --sign "$SIGNING_IDENTITY" --entitlements Whispered.entitlements "$APP_BUNDLE"
+else
+    echo "⚠️  No Apple Development certificate found, using ad-hoc signing"
+    echo "   Note: You may need to re-grant permissions after each rebuild"
+    codesign --force --deep --sign - --entitlements Whispered.entitlements "$APP_BUNDLE"
+fi
 
 echo "✅ App bundle created: $APP_BUNDLE"
 echo ""

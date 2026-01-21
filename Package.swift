@@ -14,7 +14,6 @@ let package = Package(
             name: "Whispered",
             dependencies: ["CWhisper"],
             path: "Whispered",
-            exclude: ["Resources/Assets.xcassets"],
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])
             ],
