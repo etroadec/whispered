@@ -1,11 +1,13 @@
 import AppKit
 import SwiftUI
+import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var hotkeyManager: HotkeyManager?
     private var recordingState = RecordingState()
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -22,26 +24,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Whispered")
-            button.action = #selector(togglePopover)
+            button.action = #selector(statusItemClicked)
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-
-        setupMenu()
     }
 
-    private func setupMenu() {
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent!
+
+        if event.type == .rightMouseUp {
+            // Right click - show menu
+            showMenu()
+        } else {
+            // Left click - toggle popover
+            togglePopover()
+        }
+    }
+
+    private func showMenu() {
         let menu = NSMenu()
 
-        menu.addItem(NSMenuItem(title: "Whispered", action: nil, keyEquivalent: ""))
+        let titleItem = NSMenuItem(title: "Whispered", action: nil, keyEquivalent: "")
+        titleItem.isEnabled = false
+        menu.addItem(titleItem)
+
+        let modelItem = NSMenuItem(title: "Modèle: \(WhisperService.shared.getCurrentModel().rawValue.capitalized)", action: nil, keyEquivalent: "")
+        modelItem.isEnabled = false
+        menu.addItem(modelItem)
+
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Enregistrer (⌘ droite)", action: #selector(startRecordingFromMenu), keyEquivalent: ""))
+
+        let recordItem = NSMenuItem(title: "Enregistrer (⌘ droite)", action: #selector(startRecordingFromMenu), keyEquivalent: "")
+        recordItem.target = self
+        menu.addItem(recordItem)
+
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Télécharger le modèle", action: #selector(downloadModel), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Préférences...", action: #selector(openSettings), keyEquivalent: ","))
+
+        let settingsItem = NSMenuItem(title: "Préférences...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q"))
+
+        let quitItem = NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
 
         statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
     }
 
     private func setupPopover() {
@@ -95,7 +127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePopover() {
+    private func togglePopover() {
         if let button = statusItem?.button {
             if popover?.isShown == true {
                 popover?.performClose(nil)
@@ -177,32 +209,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func downloadModel() {
-        WhisperService.shared.downloadModelIfNeeded { result in
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                switch result {
-                case .success:
-                    alert.messageText = "Modèle téléchargé"
-                    alert.informativeText = "Le modèle Whisper Base a été téléchargé avec succès."
-                    alert.alertStyle = .informational
-                case .failure(let error):
-                    alert.messageText = "Erreur de téléchargement"
-                    alert.informativeText = error.localizedDescription
-                    alert.alertStyle = .critical
-                }
-                alert.runModal()
-            }
-        }
-    }
-
     @objc private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if settingsWindow == nil {
+            let settingsView = SettingsView()
+            let hostingController = NSHostingController(rootView: settingsView)
+
+            settingsWindow = NSWindow(contentViewController: hostingController)
+            settingsWindow?.title = "Whispered - Préférences"
+            settingsWindow?.styleMask = [.titled, .closable]
+            settingsWindow?.setContentSize(NSSize(width: 500, height: 480))
+            settingsWindow?.center()
+        }
+
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
     }
 }
-
-import AVFoundation

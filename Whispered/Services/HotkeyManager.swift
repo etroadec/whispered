@@ -16,18 +16,20 @@ class HotkeyManager {
     }
 
     func start() {
-        // Create event tap to capture key events globally
+        // Create event tap to LISTEN to key events (not intercept/block them)
+        // IMPORTANT: Using .listenOnly to avoid blocking system events
         let eventMask = (1 << CGEventType.flagsChanged.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
+            place: .tailAppendEventTap,
+            options: .listenOnly,  // CRITICAL: Listen only, never block events
             eventsOfInterest: CGEventMask(eventMask),
             callback: { proxy, type, event, refcon in
-                guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
+                guard let refcon = refcon else { return nil }
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-                return manager.handleEvent(proxy: proxy, type: type, event: event)
+                manager.handleEvent(proxy: proxy, type: type, event: event)
+                return nil  // listenOnly doesn't need to return the event
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
@@ -55,10 +57,16 @@ class HotkeyManager {
         runLoopSource = nil
     }
 
-    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        guard type == .flagsChanged else {
-            return Unmanaged.passUnretained(event)
+    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) {
+        // Handle tap being disabled by the system (happens if app is too slow)
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+            return
         }
+
+        guard type == .flagsChanged else { return }
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
@@ -79,8 +87,6 @@ class HotkeyManager {
                 }
             }
         }
-
-        return Unmanaged.passUnretained(event)
     }
 
     deinit {

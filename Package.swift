@@ -24,9 +24,10 @@ let package = Package(
                 .linkedFramework("MetalKit"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreAudio"),
+                .linkedFramework("CoreML"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Foundation"),
-                .unsafeFlags(["-Llib", "-lwhisper", "-lggml", "-lggml-base", "-lggml-cpu", "-lggml-metal", "-lggml-blas", "-lc++"])
+                .unsafeFlags(["-Llib", "-lwhisper", "-lwhisper.coreml", "-lggml", "-lggml-base", "-lggml-cpu", "-lggml-metal", "-lggml-blas", "-lc++"])
             ]
         ),
         .systemLibrary(
