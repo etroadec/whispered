@@ -27,6 +27,7 @@ xcuserdata/
 
 # Claude Code (personal config)
 .claude/
+CLAUDE.md
 
 # Compiled
 *.o
