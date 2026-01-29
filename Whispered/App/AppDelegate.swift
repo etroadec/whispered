@@ -4,10 +4,11 @@ import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
+    private var floatingPanel: NSPanel?
     private var hotkeyManager: HotkeyManager?
     private var recordingState = RecordingState()
     private var settingsWindow: NSWindow?
+    private var clickOutsideMonitor: Any?
 
     // MARK: - Whisper Blank Audio Patterns
 
@@ -33,18 +34,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Regex précompilée pour détecter les textes composés uniquement de marqueurs [xxx] ou (xxx)
     private static let bracketOnlyRegex: NSRegularExpression? = {
-        // Pattern qui matche: [texte] ou (texte), répété avec espaces
         try? NSRegularExpression(pattern: #"^(\[[^\]]+\]|\([^\)]+\))(\s*(\[[^\]]+\]|\([^\)]+\)))*$"#, options: .caseInsensitive)
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
-        setupPopover()
+        setupFloatingPanel()
 
         // Hide from Dock
         NSApp.setActivationPolicy(.accessory)
 
-        // Check permissions FIRST, then setup hotkey manager only if we have permission
         if AXIsProcessTrusted() {
             print("AppDelegate: Accessibility already granted, setting up hotkey manager")
             setupHotkeyManager()
@@ -60,29 +59,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanup() {
-        // Stop accessibility check timer
         accessibilityCheckTimer?.invalidate()
         accessibilityCheckTimer = nil
 
-        // Stop hotkey manager first
         hotkeyManager?.stop()
         hotkeyManager = nil
 
-        // Stop any ongoing recording
         AudioRecorder.shared.cleanup()
-
-        // Release whisper context
         WhisperService.shared.cleanup()
 
-        // Close popover
-        popover?.close()
-        popover = nil
+        removeClickOutsideMonitor()
 
-        // Close settings window
+        floatingPanel?.close()
+        floatingPanel = nil
+
         settingsWindow?.close()
         settingsWindow = nil
 
-        // Remove status item
         if let statusItem = statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
         }
@@ -104,11 +97,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let event = NSApp.currentEvent else { return }
 
         if event.type == .rightMouseUp {
-            // Right click - show menu
             showMenu()
         } else {
-            // Left click - toggle popover
-            togglePopover()
+            togglePanel()
         }
     }
 
@@ -146,23 +137,135 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = nil
     }
 
-    private func setupPopover() {
-        popover = NSPopover()
-        popover?.contentSize = NSSize(width: 280, height: 180)
-        popover?.behavior = .semitransient
-        popover?.animates = true
-        popover?.contentViewController = NSHostingController(rootView: RecordingPopup(state: recordingState))
+    // MARK: - Floating Panel (remplace NSPopover)
+
+    private func setupFloatingPanel() {
+        let contentSize = NSSize(width: 280, height: 180)
+
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: contentSize),
+            styleMask: [.nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: true
+        )
+
+        panel.isFloatingPanel = true
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+
+        let hostingView = NSHostingView(rootView:
+            RecordingPopup(state: recordingState)
+                .background(VisualEffectBlur())
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        )
+
+        let wrapperView = NSView(frame: NSRect(origin: .zero, size: contentSize))
+        wrapperView.wantsLayer = true
+        wrapperView.layer?.cornerRadius = 12
+        wrapperView.layer?.masksToBounds = true
+
+        hostingView.frame = wrapperView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        wrapperView.addSubview(hostingView)
+
+        panel.contentView = wrapperView
+
+        floatingPanel = panel
+    }
+
+    private func togglePanel() {
+        if floatingPanel?.isVisible == true {
+            hidePanel()
+        } else {
+            showPanelUnderStatusItem()
+        }
+    }
+
+    private func showPanelUnderStatusItem() {
+        guard let panel = floatingPanel,
+              let button = statusItem?.button,
+              let buttonWindow = button.window else { return }
+
+        let buttonFrameInWindow = button.convert(button.bounds, to: nil)
+        let buttonFrameOnScreen = buttonWindow.convertToScreen(buttonFrameInWindow)
+
+        let panelSize = panel.frame.size
+        let panelX = buttonFrameOnScreen.midX - (panelSize.width / 2)
+        let panelY = buttonFrameOnScreen.minY - panelSize.height - 4
+
+        if let screen = buttonWindow.screen ?? NSScreen.main {
+            let screenFrame = screen.visibleFrame
+            let adjustedX = max(screenFrame.minX + 8, min(panelX, screenFrame.maxX - panelSize.width - 8))
+            panel.setFrameOrigin(NSPoint(x: adjustedX, y: panelY))
+        } else {
+            panel.setFrameOrigin(NSPoint(x: panelX, y: panelY))
+        }
+
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
+
+        addClickOutsideMonitor()
+    }
+
+    private func hidePanel() {
+        guard let panel = floatingPanel, panel.isVisible else { return }
+
+        removeClickOutsideMonitor()
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.1
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: {
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+        })
+    }
+
+    // MARK: - Click Outside Monitor
+
+    private func addClickOutsideMonitor() {
+        removeClickOutsideMonitor()
+
+        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            guard let self = self,
+                  let panel = self.floatingPanel,
+                  panel.isVisible else { return }
+
+            if !panel.frame.contains(NSEvent.mouseLocation) {
+                DispatchQueue.main.async {
+                    self.hidePanel()
+                }
+            }
+        }
+    }
+
+    private func removeClickOutsideMonitor() {
+        if let monitor = clickOutsideMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickOutsideMonitor = nil
+        }
     }
 
     private func setupHotkeyManager() {
-        // Don't create if already exists
         guard hotkeyManager == nil else {
             print("AppDelegate: HotkeyManager already exists")
             return
         }
 
         hotkeyManager = HotkeyManager { [weak self] isPressed in
-            // Callback is already on main thread (via main run loop)
             if isPressed {
                 self?.startRecording()
             } else {
@@ -176,23 +279,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             print("AppDelegate: Event tap active = \(hotkeyManager?.isActive() ?? false)")
         } else {
             print("AppDelegate: Hotkey manager failed to start")
-            hotkeyManager = nil  // Clean up failed manager
+            hotkeyManager = nil
         }
     }
 
     private var accessibilityCheckTimer: Timer?
 
     private func requestPermissions() {
-        // Request microphone permission (system handles the dialog)
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
 
-        // For accessibility, just trigger the system prompt if not trusted
         if !AXIsProcessTrusted() {
-            // Trigger system prompt
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
-
-            // Start polling for permission grant
             startAccessibilityCheck()
         }
     }
@@ -209,24 +307,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func togglePopover() {
-        if popover?.isShown == true {
-            popover?.performClose(nil)
-        } else {
-            showPopoverAnchored()
-        }
-    }
-
-    private func showPopoverAnchored() {
-        guard let button = statusItem?.button, popover?.isShown != true else { return }
-
-        // S'assurer que l'app est active pour que le popover s'affiche correctement
-        NSApp.activate(ignoringOtherApps: false)
-
-        // Afficher le popover ancré au bouton de la barre de menu
-        popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    }
-
     @objc private func startRecordingFromMenu() {
         startRecording()
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -240,13 +320,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingState.isRecording = true
         recordingState.statusText = "Enregistrement..."
 
-        // Show popover anchored to status item
-        showPopoverAnchored()
+        showPanelUnderStatusItem()
 
-        // Update status item icon
         statusItem?.button?.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "Recording")
 
-        // Start audio recording
         AudioRecorder.shared.startRecording()
     }
 
@@ -256,33 +333,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingState.isRecording = false
         recordingState.statusText = "Transcription..."
 
-        // Update status item icon
         statusItem?.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Whispered")
 
-        // Stop audio recording and transcribe
         AudioRecorder.shared.stopRecording { [weak self] audioURL in
             guard let audioURL = audioURL else {
                 DispatchQueue.main.async {
                     self?.recordingState.statusText = "Erreur d'enregistrement"
-                    self?.hidePopoverAfterDelay()
+                    self?.hidePanelAfterDelay()
                 }
                 return
             }
 
-            // Transcribe audio
             WhisperService.shared.transcribe(audioURL: audioURL) { result in
                 DispatchQueue.main.async {
                     switch result {
                     case .success(let text):
-                        // Valider que le texte n'est pas un marqueur Whisper ou vide
                         if self?.isValidTranscription(text) == true {
                             self?.recordingState.statusText = "Transcrit!"
                             self?.recordingState.lastTranscription = text
-
-                            // Inject text into active field
                             TextInjector.shared.injectText(text)
                         } else {
-                            // Audio vide ou marqueur Whisper - ne rien injecter
                             self?.recordingState.statusText = "Aucune parole détectée"
                             print("Whispered: Transcription ignorée (vide ou marqueur): '\(text)'")
                         }
@@ -291,7 +361,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self?.recordingState.statusText = "Erreur: \(error.localizedDescription)"
                     }
 
-                    self?.hidePopoverAfterDelay()
+                    self?.hidePanelAfterDelay()
                 }
             }
         }
@@ -299,17 +369,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Transcription Validation
 
-    /// Vérifie si le texte transcrit est valide pour injection
-    /// Retourne false si le texte est vide, un marqueur Whisper, ou du bruit
     private func isValidTranscription(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Texte vide
         guard !trimmed.isEmpty else {
             return false
         }
 
-        // Patterns exacts connus
         let upperText = trimmed.uppercased()
         for pattern in Self.whisperBlankPatterns {
             if upperText == pattern.uppercased() {
@@ -317,7 +383,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Texte qui n'est QUE des marqueurs entre crochets: [xxx] ou (xxx)
         if let regex = Self.bracketOnlyRegex {
             let range = NSRange(trimmed.startIndex..., in: trimmed)
             if regex.firstMatch(in: trimmed, options: [], range: range) != nil {
@@ -325,14 +390,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Texte qui n'est que des symboles musicaux
         let musicSymbols = CharacterSet(charactersIn: "♪♫🎵🎶")
         let withoutMusic = trimmed.unicodeScalars.filter { !musicSymbols.contains($0) }
         if withoutMusic.isEmpty || String(String.UnicodeScalarView(withoutMusic)).trimmingCharacters(in: .whitespaces).isEmpty {
             return false
         }
 
-        // Texte trop court (1-2 caractères) - probablement du bruit
         if trimmed.count < 3 {
             return false
         }
@@ -340,9 +403,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    private func hidePopoverAfterDelay() {
+    private func hidePanelAfterDelay() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.popover?.performClose(nil)
+            self?.hidePanel()
             self?.recordingState.statusText = "Prêt"
         }
     }
@@ -365,5 +428,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+}
+
+// MARK: - Visual Effect Blur
+
+struct VisualEffectBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .hudWindow
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
     }
 }
