@@ -13,6 +13,7 @@ Application macOS de transcription vocale locale, basée sur [whisper.cpp](https
 - Injection du texte dans le champ actif
 - Interface minimaliste dans la barre de menu
 - Choix du modèle Whisper (Tiny, Base, Small, Medium)
+- **Mises à jour automatiques** depuis GitHub
 
 ## Prérequis
 
@@ -205,6 +206,90 @@ make run-app      # Lancer le bundle .app (même comportement qu'installé)
 make install      # Compiler et installer dans /Applications
 make clean        # Nettoyer les fichiers de build
 ```
+
+## Mise à jour
+
+### Mise à jour automatique (v1.1.0+)
+
+À partir de la version 1.1.0, Whispered peut se mettre à jour automatiquement :
+
+1. Ouvrez **Préférences** (clic droit sur l'icône)
+2. Section **Mises à jour** → cliquez sur **Vérifier**
+3. Si une mise à jour est disponible, cliquez sur **Installer la mise à jour**
+4. L'application télécharge, s'installe et redémarre automatiquement
+
+### Mise à jour manuelle (depuis les sources)
+
+Si vous avez installé depuis les sources :
+
+```bash
+cd whispered
+git pull
+make clean && make install
+```
+
+### Première installation depuis une version antérieure
+
+Si vous aviez une version sans mise à jour automatique :
+
+```bash
+# 1. Mettre à jour les sources
+cd whispered
+git pull
+
+# 2. Recompiler et installer
+make clean && make install
+
+# 3. L'app aura maintenant les mises à jour automatiques
+```
+
+## Publier une nouvelle version (développeurs)
+
+Pour publier une mise à jour sur GitHub :
+
+1. **Mettre à jour la version** dans `scripts/bundle-app.sh` :
+   ```bash
+   VERSION="1.2.0"  # Incrémenter selon semver
+   ```
+
+2. **Compiler et créer le zip** :
+   ```bash
+   make clean && make bundle
+   cd .build/release
+   zip -r Whispered.zip Whispered.app
+   ```
+
+3. **Créer une release GitHub** :
+   - Tag : `v1.2.0` (doit correspondre à VERSION)
+   - Titre : `v1.2.0 - Description courte`
+   - Joindre : `Whispered.zip`
+   - Notes de version : décrire les changements
+
+L'application des utilisateurs détectera automatiquement la nouvelle version.
+
+## Changelog
+
+### v1.1.0 (à venir)
+
+**Nouvelles fonctionnalités :**
+- Mises à jour automatiques depuis GitHub Releases
+- Vérification des mises à jour dans les Préférences
+
+**Améliorations :**
+- Filtrage intelligent des transcriptions vides (ne colle plus "[BLANK_AUDIO]")
+- Détection des marqueurs Whisper (silence, musique, etc.)
+
+**Corrections :**
+- Pas d'injection de texte quand l'audio est vide
+
+### v1.0.0
+
+- Version initiale
+- Transcription vocale avec whisper.cpp
+- Support Metal GPU et CoreML
+- Raccourci clavier (⌘ droite)
+- Gestion des modèles (Tiny, Base, Small, Medium)
+- Lancement au démarrage
 
 ## Crédits
 

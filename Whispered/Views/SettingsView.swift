@@ -12,6 +12,13 @@ struct SettingsView: View {
     @State private var statusMessage = ""
     @State private var refreshTrigger = false
 
+    // Update states
+    @State private var isCheckingUpdate = false
+    @State private var availableUpdate: UpdateInfo?
+    @State private var updateError: String?
+    @State private var isUpdating = false
+    @State private var updateProgress: UpdateProgress?
+
     private var isAppInstalled: Bool {
         Bundle.main.bundlePath.hasPrefix("/Applications")
     }
@@ -116,14 +123,90 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("À propos") {
+                Section("Mises à jour") {
                     HStack {
-                        Text("Version")
+                        Text("Version actuelle")
                         Spacer()
-                        Text("1.0.0")
+                        Text(UpdateService.shared.currentVersion)
                             .foregroundColor(.secondary)
                     }
 
+                    if isCheckingUpdate {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Vérification...")
+                                .foregroundColor(.secondary)
+                        }
+                    } else if isUpdating, let progress = updateProgress {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(progress.description)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            ProgressView(value: progress.progress)
+                            if progress.phase == .downloading {
+                                Button("Annuler") {
+                                    UpdateService.shared.cancelUpdate()
+                                    isUpdating = false
+                                    updateProgress = nil
+                                }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                            }
+                        }
+                    } else if let update = availableUpdate {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Version \(update.version) disponible")
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Text(update.formattedFileSize)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            if let notes = update.releaseNotes, !notes.isEmpty {
+                                Text(notes)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(3)
+                            }
+
+                            Button("Installer la mise à jour") {
+                                installUpdate(update)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    } else if let error = updateError {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Réessayer") {
+                                checkForUpdate()
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                        }
+                    } else {
+                        HStack {
+                            Text("Aucune mise à jour disponible")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Vérifier") {
+                                checkForUpdate()
+                            }
+                            .buttonStyle(.link)
+                        }
+                    }
+                }
+
+                Section("À propos") {
                     HStack {
                         Text("Moteur")
                         Spacer()
@@ -142,7 +225,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 520)
+        .frame(width: 500, height: 620)
     }
 
     private func selectModel(_ model: WhisperModel) {
@@ -238,6 +321,57 @@ struct SettingsView: View {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let modelsDir = appSupport.appendingPathComponent("Whispered/models")
         NSWorkspace.shared.open(modelsDir)
+    }
+
+    // MARK: - Update Methods
+
+    private func checkForUpdate() {
+        isCheckingUpdate = true
+        updateError = nil
+        availableUpdate = nil
+
+        UpdateService.shared.checkForUpdate { result in
+            DispatchQueue.main.async {
+                isCheckingUpdate = false
+                switch result {
+                case .success(let update):
+                    availableUpdate = update
+                case .failure(let error):
+                    updateError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func installUpdate(_ update: UpdateInfo) {
+        isUpdating = true
+        updateError = nil
+
+        UpdateService.shared.downloadAndInstall(update: update) { progress in
+            // Le progress handler est déjà appelé sur main thread via delegateQueue
+            self.updateProgress = progress
+        } completion: { result in
+            // Le completion est dispatché sur main thread par UpdateService
+            switch result {
+            case .success:
+                // L'app devrait redémarrer, mais si ça échoue, reset l'UI après un délai
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if self.isUpdating {
+                        self.isUpdating = false
+                        self.updateProgress = nil
+                        self.updateError = "L'application a été mise à jour. Veuillez la relancer manuellement."
+                    }
+                }
+            case .failure(let error):
+                self.isUpdating = false
+                self.updateProgress = nil
+                if case .cancelled = error {
+                    // Annulation utilisateur, pas d'erreur à afficher
+                } else {
+                    self.updateError = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

@@ -9,6 +9,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingState = RecordingState()
     private var settingsWindow: NSWindow?
 
+    // MARK: - Whisper Blank Audio Patterns
+
+    /// Patterns Whisper indiquant un audio vide ou non-parole
+    private static let whisperBlankPatterns: [String] = [
+        "[BLANK_AUDIO]",
+        "[blank_audio]",
+        "[Blank Audio]",
+        "(blank audio)",
+        "[MUSIC]",
+        "[Music]",
+        "[APPLAUSE]",
+        "[Applause]",
+        "[LAUGHTER]",
+        "[Laughter]",
+        "[SILENCE]",
+        "[Silence]",
+        "[INAUDIBLE]",
+        "[inaudible]",
+        "[NO SPEECH]",
+        "[no speech]",
+    ]
+
+    /// Regex précompilée pour détecter les textes composés uniquement de marqueurs [xxx] ou (xxx)
+    private static let bracketOnlyRegex: NSRegularExpression? = {
+        // Pattern qui matche: [texte] ou (texte), répété avec espaces
+        try? NSRegularExpression(pattern: #"^(\[[^\]]+\]|\([^\)]+\))(\s*(\[[^\]]+\]|\([^\)]+\)))*$"#, options: .caseInsensitive)
+    }()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         setupPopover()
@@ -240,11 +268,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async {
                     switch result {
                     case .success(let text):
-                        self?.recordingState.statusText = "Transcrit!"
-                        self?.recordingState.lastTranscription = text
+                        // Valider que le texte n'est pas un marqueur Whisper ou vide
+                        if self?.isValidTranscription(text) == true {
+                            self?.recordingState.statusText = "Transcrit!"
+                            self?.recordingState.lastTranscription = text
 
-                        // Inject text into active field
-                        TextInjector.shared.injectText(text)
+                            // Inject text into active field
+                            TextInjector.shared.injectText(text)
+                        } else {
+                            // Audio vide ou marqueur Whisper - ne rien injecter
+                            self?.recordingState.statusText = "Aucune parole détectée"
+                            print("Whispered: Transcription ignorée (vide ou marqueur): '\(text)'")
+                        }
 
                     case .failure(let error):
                         self?.recordingState.statusText = "Erreur: \(error.localizedDescription)"
@@ -254,6 +289,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    // MARK: - Transcription Validation
+
+    /// Vérifie si le texte transcrit est valide pour injection
+    /// Retourne false si le texte est vide, un marqueur Whisper, ou du bruit
+    private func isValidTranscription(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Texte vide
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        // Patterns exacts connus
+        let upperText = trimmed.uppercased()
+        for pattern in Self.whisperBlankPatterns {
+            if upperText == pattern.uppercased() {
+                return false
+            }
+        }
+
+        // Texte qui n'est QUE des marqueurs entre crochets: [xxx] ou (xxx)
+        if let regex = Self.bracketOnlyRegex {
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            if regex.firstMatch(in: trimmed, options: [], range: range) != nil {
+                return false
+            }
+        }
+
+        // Texte qui n'est que des symboles musicaux
+        let musicSymbols = CharacterSet(charactersIn: "♪♫🎵🎶")
+        let withoutMusic = trimmed.unicodeScalars.filter { !musicSymbols.contains($0) }
+        if withoutMusic.isEmpty || String(String.UnicodeScalarView(withoutMusic)).trimmingCharacters(in: .whitespaces).isEmpty {
+            return false
+        }
+
+        // Texte trop court (1-2 caractères) - probablement du bruit
+        if trimmed.count < 3 {
+            return false
+        }
+
+        return true
     }
 
     private func hidePopoverAfterDelay() {
@@ -271,7 +349,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow = NSWindow(contentViewController: hostingController)
             settingsWindow?.title = "Whispered - Préférences"
             settingsWindow?.styleMask = [.titled, .closable]
-            settingsWindow?.setContentSize(NSSize(width: 500, height: 480))
+            settingsWindow?.setContentSize(NSSize(width: 500, height: 620))
             settingsWindow?.center()
         }
 
