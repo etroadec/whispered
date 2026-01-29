@@ -210,13 +210,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func togglePopover() {
-        if let button = statusItem?.button {
-            if popover?.isShown == true {
-                popover?.performClose(nil)
-            } else {
-                popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            }
+        if popover?.isShown == true {
+            popover?.performClose(nil)
+        } else {
+            showPopoverAnchored()
         }
+    }
+
+    private func showPopoverAnchored() {
+        guard let button = statusItem?.button, popover?.isShown != true else { return }
+
+        // S'assurer que l'app est active pour que le popover s'affiche correctement
+        NSApp.activate(ignoringOtherApps: false)
+
+        // Afficher le popover ancré au bouton de la barre de menu
+        popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     @objc private func startRecordingFromMenu() {
@@ -232,10 +240,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingState.isRecording = true
         recordingState.statusText = "Enregistrement..."
 
-        // Show popover
-        if let button = statusItem?.button, popover?.isShown != true {
-            popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        }
+        // Show popover anchored to status item
+        showPopoverAnchored()
 
         // Update status item icon
         statusItem?.button?.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "Recording")
