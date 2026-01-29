@@ -139,11 +139,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Floating Panel (remplace NSPopover)
 
-    private func setupFloatingPanel() {
-        let contentSize = NSSize(width: 280, height: 180)
+    private let panelSize = NSSize(width: 280, height: 200)
 
+    private func setupFloatingPanel() {
         let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: contentSize),
+            contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: true
@@ -153,23 +153,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = false
+        panel.isMovable = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
 
+        // Fixer la taille pour éviter le redimensionnement
+        panel.minSize = panelSize
+        panel.maxSize = panelSize
+
         let hostingView = NSHostingView(rootView:
             RecordingPopup(state: recordingState)
+                .frame(width: panelSize.width, height: panelSize.height)
                 .background(VisualEffectBlur())
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         )
 
-        let wrapperView = NSView(frame: NSRect(origin: .zero, size: contentSize))
+        let wrapperView = NSView(frame: NSRect(origin: .zero, size: panelSize))
         wrapperView.wantsLayer = true
         wrapperView.layer?.cornerRadius = 12
         wrapperView.layer?.masksToBounds = true
 
         hostingView.frame = wrapperView.bounds
-        hostingView.autoresizingMask = [.width, .height]
         wrapperView.addSubview(hostingView)
 
         panel.contentView = wrapperView
@@ -190,10 +195,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let button = statusItem?.button,
               let buttonWindow = button.window else { return }
 
+        // Si déjà visible, ne pas repositionner
+        guard !panel.isVisible else { return }
+
         let buttonFrameInWindow = button.convert(button.bounds, to: nil)
         let buttonFrameOnScreen = buttonWindow.convertToScreen(buttonFrameInWindow)
 
-        let panelSize = panel.frame.size
+        // Utiliser la taille fixe pour un positionnement cohérent
         let panelX = buttonFrameOnScreen.midX - (panelSize.width / 2)
         let panelY = buttonFrameOnScreen.minY - panelSize.height
 
