@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
     @AppStorage("selectedModel") private var selectedModelRaw = "base"
     @AppStorage("autoLaunch") private var autoLaunch = false
+    @AppStorage("popupMode") private var popupModeRaw = PopupMode.standard.rawValue
 
     @State private var isLoading = false
     @State private var loadingModel: WhisperModel?
@@ -96,6 +97,48 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                             .font(.system(.body, design: .monospaced))
                     }
+                }
+
+                Section("Apparence") {
+                    Picker("Mode du popup", selection: $popupModeRaw) {
+                        ForEach(PopupMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.displayName).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: popupModeRaw) { _, _ in
+                        NotificationCenter.default.post(name: .popupModeDidChange, object: nil)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Standard")
+                                .fontWeight(.medium)
+                            Text("Affichage complet avec animation et aperçu")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text("280×220")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .opacity(popupModeRaw == PopupMode.standard.rawValue ? 1.0 : 0.5)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Compact")
+                                .fontWeight(.medium)
+                            Text("Affichage minimal, moins intrusif")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text("220×80")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .opacity(popupModeRaw == PopupMode.compact.rawValue ? 1.0 : 0.5)
                 }
 
                 Section("Système") {
@@ -225,7 +268,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 620)
+        .frame(width: 500, height: 720)
     }
 
     private func selectModel(_ model: WhisperModel) {

@@ -10,6 +10,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var clickOutsideMonitor: Any?
 
+    // MARK: - Popup Mode
+
+    private var currentPopupMode: PopupMode {
+        let raw = UserDefaults.standard.string(forKey: "popupMode") ?? PopupMode.standard.rawValue
+        return PopupMode(rawValue: raw) ?? .standard
+    }
+
     // MARK: - Whisper Blank Audio Patterns
 
     /// Patterns Whisper indiquant un audio vide ou non-parole
@@ -41,6 +48,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupFloatingPanel()
 
+        // Observer pour changement de mode popup
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(popupModeDidChange),
+            name: .popupModeDidChange,
+            object: nil
+        )
+
         // Hide from Dock
         NSApp.setActivationPolicy(.accessory)
 
@@ -52,6 +67,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         requestPermissions()
+    }
+
+    @objc private func popupModeDidChange() {
+        rebuildFloatingPanel()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -139,9 +158,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Floating Panel (remplace NSPopover)
 
-    private let panelSize = NSSize(width: 280, height: 220)
-
     private func setupFloatingPanel() {
+        let mode = currentPopupMode
+        let panelSize = mode.size
+
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
@@ -163,7 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.maxSize = panelSize
 
         let hostingView = NSHostingView(rootView:
-            RecordingPopup(state: recordingState)
+            RecordingPopup(state: recordingState, mode: mode)
                 .frame(width: panelSize.width, height: panelSize.height)
                 .background(VisualEffectBlur())
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -182,34 +202,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPanel = panel
     }
 
+    private func rebuildFloatingPanel() {
+        let wasVisible = floatingPanel?.isVisible ?? false
+
+        floatingPanel?.orderOut(nil)
+        floatingPanel = nil
+
+        setupFloatingPanel()
+
+        if wasVisible {
+            showPanelCenteredTop()
+        }
+    }
+
     private func togglePanel() {
         if floatingPanel?.isVisible == true {
             hidePanel()
         } else {
-            showPanelUnderStatusItem()
+            showPanelCenteredTop()
         }
     }
 
-    private func showPanelUnderStatusItem() {
-        guard let panel = floatingPanel,
-              let button = statusItem?.button,
-              let buttonWindow = button.window else { return }
+    private func showPanelCenteredTop() {
+        guard let panel = floatingPanel else { return }
 
         // Si déjà visible, ne pas repositionner
         guard !panel.isVisible else { return }
 
-        let buttonFrameInWindow = button.convert(button.bounds, to: nil)
-        let buttonFrameOnScreen = buttonWindow.convertToScreen(buttonFrameInWindow)
+        let panelSize = currentPopupMode.size
 
-        // Utiliser la taille fixe pour un positionnement cohérent
-        let panelX = buttonFrameOnScreen.midX - (panelSize.width / 2)
-        let panelY = buttonFrameOnScreen.minY - panelSize.height
-
-        if let screen = buttonWindow.screen ?? NSScreen.main {
+        // Centrer horizontalement sur l'écran principal, en haut avec marge
+        if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
-            let adjustedX = max(screenFrame.minX + 8, min(panelX, screenFrame.maxX - panelSize.width - 8))
-            panel.setFrameOrigin(NSPoint(x: adjustedX, y: panelY))
-        } else {
+            let panelX = screenFrame.midX - (panelSize.width / 2)
+            // Positionner en haut avec une marge de 60pt sous la barre de menu
+            let panelY = screenFrame.maxY - panelSize.height - 60
             panel.setFrameOrigin(NSPoint(x: panelX, y: panelY))
         }
 
@@ -328,7 +355,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingState.isRecording = true
         recordingState.statusText = "Enregistrement..."
 
-        showPanelUnderStatusItem()
+        showPanelCenteredTop()
 
         statusItem?.button?.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "Recording")
 
@@ -426,7 +453,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow = NSWindow(contentViewController: hostingController)
             settingsWindow?.title = "Whispered - Préférences"
             settingsWindow?.styleMask = [.titled, .closable]
-            settingsWindow?.setContentSize(NSSize(width: 500, height: 620))
+            settingsWindow?.setContentSize(NSSize(width: 500, height: 720))
             settingsWindow?.center()
         }
 
@@ -457,4 +484,10 @@ struct VisualEffectBlur: NSViewRepresentable {
         nsView.material = material
         nsView.blendingMode = blendingMode
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let popupModeDidChange = Notification.Name("popupModeDidChange")
 }

@@ -13,6 +13,7 @@ Application macOS de transcription vocale locale, basée sur [whisper.cpp](https
 - Injection du texte dans le champ actif
 - Interface minimaliste dans la barre de menu
 - Choix du modèle Whisper (Tiny, Base, Small, Medium)
+- **Popup personnalisable** : mode Standard ou Compact
 - **Mises à jour automatiques** depuis GitHub
 
 ## Prérequis
@@ -69,6 +70,19 @@ make download-all
 ```
 
 ## Utilisation
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. APPUYER          2. PARLER           3. RELÂCHER           │
+│                                                                 │
+│   ┌─────────┐       ┌─────────────┐       ┌─────────────────┐  │
+│   │  ⌘ →    │  ──▶  │  🎙️ "Bonjour │  ──▶  │ Bonjour tout le │  │
+│   │ (droite)│       │  tout le    │       │ monde|          │  │
+│   └─────────┘       │  monde"     │       └─────────────────┘  │
+│                     └─────────────┘         ↑ Texte injecté    │
+│                                             dans le curseur    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 1. L'icône apparaît dans la barre de menu (forme d'onde)
 2. **Maintenez la touche Command droite (⌘)** enfoncée
@@ -269,7 +283,14 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
 
-### v1.1.0 (à venir)
+### v1.2.0 (à venir)
+
+**Nouvelles fonctionnalités :**
+- Deux modes de popup : Standard (complet) et Compact (minimal)
+- Popup centré en haut de l'écran pour moins de distraction
+- Sélection du mode dans les Préférences → Apparence
+
+### v1.1.0
 
 **Nouvelles fonctionnalités :**
 - Mises à jour automatiques depuis GitHub Releases
@@ -278,9 +299,12 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 **Améliorations :**
 - Filtrage intelligent des transcriptions vides (ne colle plus "[BLANK_AUDIO]")
 - Détection des marqueurs Whisper (silence, musique, etc.)
+- Interface popup remplacée par un panneau flottant plus fiable
 
 **Corrections :**
 - Pas d'injection de texte quand l'audio est vide
+- Positionnement du popup corrigé
+- Redémarrage après mise à jour corrigé
 
 ### v1.0.0
 
