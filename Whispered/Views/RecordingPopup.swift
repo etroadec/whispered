@@ -56,7 +56,8 @@ struct RecordingPopup: View {
             }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
+        .padding(.top, 28)
+        .padding(.bottom, 20)
         .frame(minWidth: 280)
     }
 }

@@ -195,7 +195,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let panelSize = panel.frame.size
         let panelX = buttonFrameOnScreen.midX - (panelSize.width / 2)
-        let panelY = buttonFrameOnScreen.minY - panelSize.height - 4
+        let panelY = buttonFrameOnScreen.minY - panelSize.height
 
         if let screen = buttonWindow.screen ?? NSScreen.main {
             let screenFrame = screen.visibleFrame
