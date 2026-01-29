@@ -175,7 +175,7 @@ class UpdateService: NSObject {
     static let shared = UpdateService()
     
     // Configuration
-    private(set) var githubOwner: String = "edgard"
+    private(set) var githubOwner: String = "etroadec"
     private(set) var githubRepo: String = "whispered"
     
     // State (synchronized via stateLock)
