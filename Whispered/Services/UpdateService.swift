@@ -696,7 +696,7 @@ class UpdateService: NSObject {
         completion: @escaping (Result<Void, UpdateError>) -> Void
     ) {
         progress(UpdateProgress(phase: .restarting, progress: 1.0, bytesDownloaded: 0, totalBytes: 0))
-        
+
         // Path to the installed app
         let installedAppPath: String
         if Bundle.main.bundlePath.hasPrefix("/Applications") {
@@ -704,29 +704,34 @@ class UpdateService: NSObject {
         } else {
             installedAppPath = "/Applications/Whispered.app"
         }
-        
+
         Self.logger.info("Restarting app from: \(installedAppPath)")
-        
-        // Use 'open' command to launch the new app after a short delay
-        // This runs in background so current app can quit
-        let script = """
-        (sleep 1 && open '\(installedAppPath)') &
+
+        // Créer un script temporaire qui survit à la fermeture de l'app
+        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("whispered_restart.sh")
+        let scriptContent = """
+        #!/bin/bash
+        sleep 2
+        open "\(installedAppPath)"
+        rm -f "\(tempScript.path)"
         """
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
-        
+
         do {
+            try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
+
+            // Rendre le script exécutable et le lancer avec nohup
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", "chmod +x '\(tempScript.path)' && nohup '\(tempScript.path)' >/dev/null 2>&1 &"]
+
             try process.run()
         } catch {
             Self.logger.error("Failed to schedule restart: \(error.localizedDescription)")
-            // Don't fail the update for this - the app was installed successfully
         }
-        
+
         completion(.success(()))
-        
-        // Terminate the current app
+
+        // Terminer l'app actuelle
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             NSApplication.shared.terminate(nil)
         }
