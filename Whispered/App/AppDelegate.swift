@@ -139,7 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Floating Panel (remplace NSPopover)
 
-    private let panelSize = NSSize(width: 280, height: 200)
+    private let panelSize = NSSize(width: 280, height: 220)
 
     private func setupFloatingPanel() {
         let panel = NSPanel(
