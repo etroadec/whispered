@@ -163,13 +163,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
-        guard let event = NSApp.currentEvent else { return }
-        
-        if event.type == .rightMouseUp {
-            showMenu()
-        } else {
-            togglePanel()
-        }
+        // Clic gauche ou droit ouvre toujours le menu
+        showMenu()
     }
     
     // MARK: - Context Menu

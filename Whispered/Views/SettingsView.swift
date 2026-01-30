@@ -128,20 +128,33 @@ struct SettingsView: View {
                 
                 Section("Raccourci clavier") {
                     Picker("Touche", selection: $hotkeyChoiceRaw) {
-                        ForEach(HotkeyChoice.allCases) { choice in
-                            HStack {
-                                Text(choice.symbol)
-                                    .font(.system(.body, design: .monospaced))
-                                    .frame(width: 30)
-                                Text(choice.displayName)
+                        ForEach(HotkeyChoice.groupedByCategory, id: \.category) { group in
+                            Section(header: Text(group.category)) {
+                                ForEach(group.choices) { choice in
+                                    Text(choice.displayName).tag(choice.rawValue)
+                                }
                             }
-                            .tag(choice.rawValue)
                         }
                     }
                     .pickerStyle(.menu)
                     .onChange(of: hotkeyChoiceRaw) { _, newValue in
                         if let choice = HotkeyChoice(rawValue: newValue) {
                             HotkeySettingsManager.shared.hotkeyChoice = choice
+                        }
+                    }
+
+                    // Affichage de la touche sélectionnée
+                    if let choice = HotkeyChoice(rawValue: hotkeyChoiceRaw) {
+                        HStack {
+                            Text("Touche sélectionnée :")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(choice.fullDescription)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.accentColor.opacity(0.15))
+                                .cornerRadius(6)
                         }
                     }
                     

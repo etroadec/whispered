@@ -141,21 +141,25 @@ class HotkeyManager {
         switch type {
         case .flagsChanged:
             handleFlagsChanged(event: event)
-            
+
         case .keyDown:
-            // For Fn key which may come as keyDown/keyUp instead of flagsChanged
-            if currentHotkey == .fn && !isKeyPressed {
-                isKeyPressed = true
-                callback(true)
+            // Pour les touches de fonction (F1-F12) et Fn qui utilisent keyDown/keyUp
+            if currentHotkey.isFunctionKey || currentHotkey == .fn {
+                if !isKeyPressed {
+                    isKeyPressed = true
+                    callback(true)
+                }
             }
-            
+
         case .keyUp:
-            // For Fn key release
-            if currentHotkey == .fn && isKeyPressed {
-                isKeyPressed = false
-                callback(false)
+            // Pour les touches de fonction (F1-F12) et Fn qui utilisent keyDown/keyUp
+            if currentHotkey.isFunctionKey || currentHotkey == .fn {
+                if isKeyPressed {
+                    isKeyPressed = false
+                    callback(false)
+                }
             }
-            
+
         default:
             break
         }
