@@ -283,7 +283,14 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
 
-### v1.2.0 (à venir)
+### v1.4.0 (à venir)
+
+**Nouvelles fonctionnalités :**
+- **Choix du raccourci clavier** : ⌘ droite, Fn, ⌥ droite, ou Ctrl droite
+- **Mode d'enregistrement** : Maintenir (hold-to-talk) ou Appuyer (toggle)
+- **Langues favorites** : Définir 1-2 langues pour accès rapide dans le menu
+
+### v1.2.0
 
 **Nouvelles fonctionnalités :**
 - Deux modes de popup : Standard (complet) et Compact (minimal)
