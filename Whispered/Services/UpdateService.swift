@@ -566,48 +566,68 @@ class UpdateService: NSObject {
         completion: @escaping (Result<Void, UpdateError>) -> Void
     ) {
         let fileManager = FileManager.default
-        
+
         do {
             // Create backup of existing app
             let backupURL = targetURL.deletingLastPathComponent()
                 .appendingPathComponent("\(targetURL.deletingPathExtension().lastPathComponent)_backup.app")
-            
+
             // Remove any existing backup
             if fileManager.fileExists(atPath: backupURL.path) {
                 try fileManager.removeItem(at: backupURL)
             }
-            
+
             // Move current app to backup
             if fileManager.fileExists(atPath: targetURL.path) {
                 try fileManager.moveItem(at: targetURL, to: backupURL)
             }
-            
+
             // Copy new app to target
             do {
                 try fileManager.copyItem(at: newAppURL, to: targetURL)
-                
+
+                // Supprimer l'attribut de quarantaine pour éviter le blocage Gatekeeper
+                removeQuarantineAttribute(from: targetURL)
+
                 // Success - remove backup and temp files
                 try? fileManager.removeItem(at: backupURL)
                 try? fileManager.removeItem(at: tempDir)
-                
+
                 Self.logger.info("Installation successful")
-                
+
                 // Restart the app
-                restartApp(progress: progress, completion: completion)
-                
+                restartApp(at: targetURL, progress: progress, completion: completion)
+
             } catch {
                 // Restore backup on failure
                 Self.logger.error("Installation failed, restoring backup")
                 try? fileManager.removeItem(at: targetURL)
                 try? fileManager.moveItem(at: backupURL, to: targetURL)
                 try? fileManager.removeItem(at: tempDir)
-                
+
                 completion(.failure(.installationFailed(error.localizedDescription)))
             }
-            
+
         } catch {
             try? fileManager.removeItem(at: tempDir)
             completion(.failure(.installationFailed(error.localizedDescription)))
+        }
+    }
+
+    /// Supprime l'attribut de quarantaine macOS pour éviter le blocage Gatekeeper
+    private func removeQuarantineAttribute(from appURL: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        process.arguments = ["-rd", "com.apple.quarantine", appURL.path]
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                Self.logger.info("Quarantine attribute removed from \(appURL.lastPathComponent)")
+            }
+        } catch {
+            Self.logger.warning("Failed to remove quarantine attribute: \(error.localizedDescription)")
         }
     }
     
@@ -677,13 +697,16 @@ class UpdateService: NSObject {
                 return
             }
             
+            // Supprimer l'attribut de quarantaine
+            removeQuarantineAttribute(from: targetURL)
+
             // Clean up temp files
             try? FileManager.default.removeItem(at: tempDir)
-            
+
             Self.logger.info("Authorized installation successful")
-            
+
             // Restart the app
-            restartApp(progress: progress, completion: completion)
+            restartApp(at: targetURL, progress: progress, completion: completion)
             
         } else {
             try? FileManager.default.removeItem(at: tempDir)
@@ -692,28 +715,54 @@ class UpdateService: NSObject {
     }
     
     private func restartApp(
+        at appURL: URL,
         progress: @escaping (UpdateProgress) -> Void,
         completion: @escaping (Result<Void, UpdateError>) -> Void
     ) {
         progress(UpdateProgress(phase: .restarting, progress: 1.0, bytesDownloaded: 0, totalBytes: 0))
 
-        // Path to the installed app
-        let installedAppPath: String
-        if Bundle.main.bundlePath.hasPrefix("/Applications") {
-            installedAppPath = Bundle.main.bundlePath
-        } else {
-            installedAppPath = "/Applications/Whispered.app"
-        }
-
+        let installedAppPath = appURL.path
         Self.logger.info("Restarting app from: \(installedAppPath)")
 
+        // Échapper le path pour le shell
+        let escapedPath = shellEscape(installedAppPath)
+
         // Créer un script temporaire qui survit à la fermeture de l'app
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("whispered_restart.sh")
+        let scriptName = "whispered_restart_\(ProcessInfo.processInfo.processIdentifier).sh"
+        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent(scriptName)
+        let escapedScriptPath = shellEscape(tempScript.path)
+
+        // Script amélioré avec logging et retry
         let scriptContent = """
         #!/bin/bash
-        sleep 2
-        open "\(installedAppPath)"
-        rm -f "\(tempScript.path)"
+        LOG="/tmp/whispered_restart.log"
+        echo "$(date): Starting restart script" >> "$LOG"
+
+        # Attendre que l'ancienne app soit fermée
+        sleep 3
+
+        # Vérifier que l'app existe
+        if [ ! -d '\(escapedPath)' ]; then
+            echo "$(date): ERROR - App not found at '\(escapedPath)'" >> "$LOG"
+            exit 1
+        fi
+
+        echo "$(date): Opening app at '\(escapedPath)'" >> "$LOG"
+
+        # Ouvrir l'app avec retry
+        for i in 1 2 3; do
+            open '\(escapedPath)' 2>> "$LOG"
+            if [ $? -eq 0 ]; then
+                echo "$(date): App opened successfully (attempt $i)" >> "$LOG"
+                break
+            fi
+            echo "$(date): Failed to open app (attempt $i), retrying..." >> "$LOG"
+            sleep 2
+        done
+
+        # Nettoyer
+        rm -f '\(escapedScriptPath)'
+        echo "$(date): Restart script completed" >> "$LOG"
         """
 
         do {
@@ -722,17 +771,18 @@ class UpdateService: NSObject {
             // Rendre le script exécutable et le lancer avec nohup
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", "chmod +x '\(tempScript.path)' && nohup '\(tempScript.path)' >/dev/null 2>&1 &"]
+            process.arguments = ["-c", "chmod +x '\(escapedScriptPath)' && nohup '\(escapedScriptPath)' >/dev/null 2>&1 &"]
 
             try process.run()
+            Self.logger.info("Restart script launched: \(tempScript.path)")
         } catch {
             Self.logger.error("Failed to schedule restart: \(error.localizedDescription)")
         }
 
         completion(.success(()))
 
-        // Terminer l'app actuelle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Terminer l'app actuelle après un court délai
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             NSApplication.shared.terminate(nil)
         }
     }
