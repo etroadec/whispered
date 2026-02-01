@@ -724,65 +724,71 @@ class UpdateService: NSObject {
         let installedAppPath = appURL.path
         Self.logger.info("Restarting app from: \(installedAppPath)")
 
-        // Échapper le path pour le shell
-        let escapedPath = shellEscape(installedAppPath)
+        // Utiliser launchctl pour un redémarrage fiable (survit à la fermeture de l'app)
+        let plistPath = "/tmp/com.whispered.restart.plist"
+        let logPath = "/tmp/whispered_restart.log"
 
-        // Créer un script temporaire qui survit à la fermeture de l'app
-        let scriptName = "whispered_restart_\(ProcessInfo.processInfo.processIdentifier).sh"
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent(scriptName)
-        let escapedScriptPath = shellEscape(tempScript.path)
-
-        // Script amélioré avec logging et retry
-        let scriptContent = """
-        #!/bin/bash
-        LOG="/tmp/whispered_restart.log"
-        echo "$(date): Starting restart script" >> "$LOG"
-
-        # Attendre que l'ancienne app soit fermée
-        sleep 3
-
-        # Vérifier que l'app existe
-        if [ ! -d '\(escapedPath)' ]; then
-            echo "$(date): ERROR - App not found at '\(escapedPath)'" >> "$LOG"
-            exit 1
-        fi
-
-        echo "$(date): Opening app at '\(escapedPath)'" >> "$LOG"
-
-        # Ouvrir l'app avec retry
-        for i in 1 2 3; do
-            open '\(escapedPath)' 2>> "$LOG"
-            if [ $? -eq 0 ]; then
-                echo "$(date): App opened successfully (attempt $i)" >> "$LOG"
-                break
-            fi
-            echo "$(date): Failed to open app (attempt $i), retrying..." >> "$LOG"
-            sleep 2
-        done
-
-        # Nettoyer
-        rm -f '\(escapedScriptPath)'
-        echo "$(date): Restart script completed" >> "$LOG"
+        // Créer un LaunchAgent temporaire
+        let plistContent = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.whispered.restart</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>/bin/bash</string>
+                <string>-c</string>
+                <string>sleep 2; echo "$(date): Restarting \(installedAppPath)" >> \(logPath); open "\(installedAppPath)" 2>> \(logPath); launchctl remove com.whispered.restart; rm -f \(plistPath)</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>StandardOutPath</key>
+            <string>\(logPath)</string>
+            <key>StandardErrorPath</key>
+            <string>\(logPath)</string>
+        </dict>
+        </plist>
         """
 
         do {
-            try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
+            // Écrire le plist
+            try plistContent.write(toFile: plistPath, atomically: true, encoding: .utf8)
 
-            // Rendre le script exécutable et le lancer avec nohup
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", "chmod +x '\(escapedScriptPath)' && nohup '\(escapedScriptPath)' >/dev/null 2>&1 &"]
+            // Charger le LaunchAgent avec launchctl
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            task.arguments = ["load", plistPath]
+            task.standardOutput = FileHandle.nullDevice
+            task.standardError = FileHandle.nullDevice
 
-            try process.run()
-            Self.logger.info("Restart script launched: \(tempScript.path)")
+            try task.run()
+            task.waitUntilExit()
+
+            if task.terminationStatus == 0 {
+                Self.logger.info("Restart scheduled via launchctl")
+            } else {
+                Self.logger.warning("launchctl load returned: \(task.terminationStatus)")
+            }
+
         } catch {
             Self.logger.error("Failed to schedule restart: \(error.localizedDescription)")
+            // En cas d'échec, informer l'utilisateur
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Mise à jour installée"
+                alert.informativeText = "L'application a été mise à jour mais n'a pas pu redémarrer automatiquement.\n\nVeuillez relancer Whispered manuellement depuis /Applications."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
         }
 
         completion(.success(()))
 
-        // Terminer l'app actuelle après un court délai
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Terminer l'app actuelle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             NSApplication.shared.terminate(nil)
         }
     }
