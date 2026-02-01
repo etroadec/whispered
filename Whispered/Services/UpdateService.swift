@@ -724,30 +724,39 @@ class UpdateService: NSObject {
         let installedAppPath = appURL.path
         Self.logger.info("Restarting app from: \(installedAppPath)")
 
-        // Utiliser launchctl pour un redémarrage fiable (survit à la fermeture de l'app)
-        let plistPath = "/tmp/com.whispered.restart.plist"
-        let logPath = "/tmp/whispered_restart.log"
+        // Validation : le path doit être dans /Applications ou le home directory
+        let validPrefixes = ["/Applications/", NSHomeDirectory()]
+        guard validPrefixes.contains(where: { installedAppPath.hasPrefix($0) }) else {
+            Self.logger.error("Invalid app path for restart: \(installedAppPath)")
+            showRestartFailedAlert()
+            completion(.success(()))
+            return
+        }
 
-        // Créer un LaunchAgent temporaire
+        // Échapper le path pour éviter l'injection de commandes
+        let escapedAppPath = shellEscape(installedAppPath)
+
+        // Utiliser un UUID pour éviter les collisions
+        let uniqueId = UUID().uuidString.prefix(8)
+        let labelName = "com.whispered.restart.\(uniqueId)"
+        let plistPath = "/tmp/\(labelName).plist"
+
+        // Créer un LaunchAgent temporaire (sans logs pour la prod)
         let plistContent = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>com.whispered.restart</string>
+            <string>\(labelName)</string>
             <key>ProgramArguments</key>
             <array>
                 <string>/bin/bash</string>
                 <string>-c</string>
-                <string>sleep 2; echo "$(date): Restarting \(installedAppPath)" >> \(logPath); open "\(installedAppPath)" 2>> \(logPath); launchctl remove com.whispered.restart; rm -f \(plistPath)</string>
+                <string>sleep 2; open '\(escapedAppPath)'; launchctl remove \(labelName); rm -f '\(plistPath)'</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
-            <key>StandardOutPath</key>
-            <string>\(logPath)</string>
-            <key>StandardErrorPath</key>
-            <string>\(logPath)</string>
         </dict>
         </plist>
         """
@@ -770,26 +779,33 @@ class UpdateService: NSObject {
                 Self.logger.info("Restart scheduled via launchctl")
             } else {
                 Self.logger.warning("launchctl load returned: \(task.terminationStatus)")
+                // Nettoyer le plist orphelin
+                try? FileManager.default.removeItem(atPath: plistPath)
+                showRestartFailedAlert()
             }
 
         } catch {
             Self.logger.error("Failed to schedule restart: \(error.localizedDescription)")
-            // En cas d'échec, informer l'utilisateur
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Mise à jour installée"
-                alert.informativeText = "L'application a été mise à jour mais n'a pas pu redémarrer automatiquement.\n\nVeuillez relancer Whispered manuellement depuis /Applications."
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
+            try? FileManager.default.removeItem(atPath: plistPath)
+            showRestartFailedAlert()
         }
 
         completion(.success(()))
 
-        // Terminer l'app actuelle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Terminer l'app avec délai suffisant pour que launchctl charge le job
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             NSApplication.shared.terminate(nil)
+        }
+    }
+
+    private func showRestartFailedAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Mise à jour installée"
+            alert.informativeText = "L'application a été mise à jour mais n'a pas pu redémarrer automatiquement.\n\nVeuillez relancer Whispered manuellement depuis /Applications."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 }
