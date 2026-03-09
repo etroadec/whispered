@@ -350,7 +350,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 850)
+        .frame(width: 500, height: 950)
         .onReceive(NotificationCenter.default.publisher(for: .favoriteLanguagesDidChange)) { _ in
             favoriteLanguages = FavoriteLanguagesManager.shared.favorites
         }
@@ -659,6 +659,12 @@ struct ModelRow: View {
             return "~500 MB - Precis, recommande"
         case .medium:
             return "~1.5 GB - Tres precis, plus lent"
+        case .largeV3TurboQ5:
+            return "~574 MB - Rapide et precis, quantise"
+        case .largeV3Turbo:
+            return "~1.6 GB - Haute qualite, rapide"
+        case .largeV3Q5:
+            return "~1.1 GB - Meilleure precision, quantise"
         }
     }
 }

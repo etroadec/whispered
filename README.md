@@ -12,7 +12,7 @@ Application macOS de transcription vocale locale, basée sur [whisper.cpp](https
 - Détection automatique de la langue
 - Injection du texte dans le champ actif
 - Interface minimaliste dans la barre de menu
-- Choix du modèle Whisper (Tiny, Base, Small, Medium)
+- Choix du modèle Whisper (Tiny, Base, Small, Medium, Large V3)
 - **Popup personnalisable** : mode Standard ou Compact
 - **Mises à jour automatiques** depuis GitHub
 
@@ -104,10 +104,13 @@ make download-all
 |--------|--------|-----------|---------|
 | Tiny | ~75 MB | ⭐ | Très rapide |
 | Base | ~150 MB | ⭐⭐ | Rapide |
-| **Small** | ~500 MB | ⭐⭐⭐ | Moyen |
+| Small | ~500 MB | ⭐⭐⭐ | Moyen |
 | Medium | ~1.5 GB | ⭐⭐⭐⭐ | Lent |
+| **Large V3 Turbo Q5** | ~574 MB | ⭐⭐⭐⭐ | Rapide |
+| Large V3 Turbo | ~1.6 GB | ⭐⭐⭐⭐⭐ | Moyen |
+| Large V3 Q5 | ~1.1 GB | ⭐⭐⭐⭐⭐ | Lent |
 
-> **Recommandation** : Le modèle **Small** offre le meilleur rapport qualité/vitesse sur Apple Silicon.
+> **Recommandation** : Le modèle **Large V3 Turbo Q5** offre le meilleur rapport qualité/vitesse sur Apple Silicon.
 
 Les modèles sont téléchargés depuis [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) et stockés dans :
 ```
@@ -283,7 +286,15 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
 
-### v1.4.0 (à venir)
+### v1.5.0
+
+**Nouvelles fonctionnalités :**
+- **Modèles Large V3** : Ajout de 3 nouveaux modèles Whisper large-v3 pour une meilleure précision
+  - Large V3 Turbo Q5 (~574 MB) - Rapide et précis, quantisé
+  - Large V3 Turbo (~1.6 GB) - Haute qualité
+  - Large V3 Q5 (~1.1 GB) - Meilleure précision, quantisé
+
+### v1.4.0
 
 **Nouvelles fonctionnalités :**
 - **Choix du raccourci clavier** : ⌘ droite, Fn, ⌥ droite, ou Ctrl droite

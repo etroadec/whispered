@@ -6,6 +6,9 @@ enum WhisperModel: String, CaseIterable {
     case base = "base"
     case small = "small"
     case medium = "medium"
+    case largeV3TurboQ5 = "large-v3-turbo-q5_0"
+    case largeV3Turbo = "large-v3-turbo"
+    case largeV3Q5 = "large-v3-q5_0"
 
     var displayName: String {
         switch self {
@@ -13,6 +16,9 @@ enum WhisperModel: String, CaseIterable {
         case .base: return "Base (~150MB) - Équilibré"
         case .small: return "Small (~500MB) - Précis"
         case .medium: return "Medium (~1.5GB) - Très précis"
+        case .largeV3TurboQ5: return "Large V3 Turbo Q5 (~574MB) - Rapide et précis"
+        case .largeV3Turbo: return "Large V3 Turbo (~1.6GB) - Haute qualité"
+        case .largeV3Q5: return "Large V3 Q5 (~1.1GB) - Meilleure précision"
         }
     }
 
@@ -25,11 +31,20 @@ enum WhisperModel: String, CaseIterable {
     }
 
     var coreMLFileName: String {
-        return "ggml-\(rawValue)-encoder.mlmodelc"
+        return "ggml-\(coreMLBaseName)-encoder.mlmodelc"
     }
 
     var coreMLDownloadURL: URL {
-        URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-\(rawValue)-encoder.mlmodelc.zip")!
+        URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-\(coreMLBaseName)-encoder.mlmodelc.zip")!
+    }
+
+    /// Base name for CoreML encoder (quantized variants share the same encoder as their full model)
+    private var coreMLBaseName: String {
+        switch self {
+        case .largeV3TurboQ5: return "large-v3-turbo"
+        case .largeV3Q5: return "large-v3"
+        default: return rawValue
+        }
     }
 }
 
@@ -285,9 +300,17 @@ class WhisperService {
                 try FileManager.default.removeItem(at: modelFile)
             }
 
-            // Delete CoreML model if exists
-            if FileManager.default.fileExists(atPath: coreMLDir.path) {
-                try FileManager.default.removeItem(at: coreMLDir)
+            // Only delete CoreML if no other installed model shares the same encoder
+            let otherModelsUsingSameCoreML = WhisperModel.allCases.filter {
+                $0 != model
+                && $0.coreMLFileName == model.coreMLFileName
+                && isModelAvailable($0)
+            }
+
+            if otherModelsUsingSameCoreML.isEmpty {
+                if FileManager.default.fileExists(atPath: coreMLDir.path) {
+                    try FileManager.default.removeItem(at: coreMLDir)
+                }
             }
 
             return .success(())
