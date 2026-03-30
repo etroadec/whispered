@@ -222,8 +222,8 @@ class WhisperService {
         }
     }
 
-    /// RMS threshold below which audio is considered silent (~-40 dB)
-    private static let silenceRMSThreshold: Float = 0.01
+    /// RMS threshold below which audio is considered silent (~-46 dB)
+    private static let silenceRMSThreshold: Float = 0.005
 
     /// Detects silence by computing RMS energy of audio samples.
     /// Returns true if RMS is below threshold, indicating no speech.

@@ -4,7 +4,7 @@ set -e
 # Configuration
 APP_NAME="Whispered"
 BUNDLE_ID="com.whispered.app"
-VERSION="1.5.1"
+VERSION="1.5.2"
 BUILD_DIR=".build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
