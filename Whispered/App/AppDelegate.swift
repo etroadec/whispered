@@ -60,6 +60,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         "[NO SPEECH]",
         "[no speech]",
     ]
+
+    /// Hallucinations courantes de Whisper sur audio silencieux (pre-normalisees : lowercase, sans accents, sans ponctuation)
+    private static let whisperHallucinationPatterns: [String] = [
+        // Francais
+        "merci",
+        "merci beaucoup",
+        "merci d'avoir regarde",
+        "merci de votre attention",
+        "sous-titrage st",
+        "sous-titrage societe radio-canada",
+        "sous-titres par",
+        "sous-titres realises",
+        "radio-canada",
+        "srt par",
+        "au revoir",
+        "bonne journee",
+        "a bientot",
+        // English
+        "thank you",
+        "thank you for watching",
+        "thanks for watching",
+        "subscribe",
+        "please subscribe",
+        "goodbye",
+        "you",
+    ]
     
     /// Regex precompilee pour detecter les textes composes uniquement de marqueurs [xxx] ou (xxx)
     private static let bracketOnlyRegex: NSRegularExpression? = {
@@ -549,6 +575,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // MARK: - Transcription Validation
     
+    /// Normalise un texte pour comparaison anti-hallucination:
+    /// lowercase, supprime les accents, supprime la ponctuation et espaces en debut/fin.
+    private func normalizeForComparison(_ text: String) -> String {
+        var normalized = text.lowercased()
+        // Remove diacritics (é -> e, à -> a, etc.)
+        normalized = normalized.folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr"))
+        // Strip leading AND trailing punctuation and whitespace
+        let stripChars = CharacterSet.punctuationCharacters.union(.whitespaces)
+        while let first = normalized.unicodeScalars.first, stripChars.contains(first) {
+            normalized = String(normalized.dropFirst())
+        }
+        while let last = normalized.unicodeScalars.last, stripChars.contains(last) {
+            normalized = String(normalized.dropLast())
+        }
+        return normalized
+    }
+
     private func isValidTranscription(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -556,6 +599,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         
+        // Check exact blank patterns (case-insensitive)
         let upperText = trimmed.uppercased()
         for pattern in Self.whisperBlankPatterns {
             if upperText == pattern.uppercased() {
@@ -563,6 +607,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
+        // Check bracket-only patterns like [MUSIC] [Applause] etc.
         if let regex = Self.bracketOnlyRegex {
             let range = NSRange(trimmed.startIndex..., in: trimmed)
             if regex.firstMatch(in: trimmed, options: [], range: range) != nil {
@@ -570,14 +615,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
-        let musicSymbols = CharacterSet(charactersIn: "")
+        // Check music symbol-only text
+        let musicSymbols = CharacterSet(charactersIn: "\u{266a}\u{266b}")
         let withoutMusic = trimmed.unicodeScalars.filter { !musicSymbols.contains($0) }
         if withoutMusic.isEmpty || String(String.UnicodeScalarView(withoutMusic)).trimmingCharacters(in: .whitespaces).isEmpty {
             return false
         }
         
+        // Reject very short transcriptions (likely noise)
         if trimmed.count < 3 {
             return false
+        }
+        
+        // Check hallucination patterns (normalized comparison)
+        let normalized = normalizeForComparison(trimmed)
+        if normalized.isEmpty {
+            return false
+        }
+        for pattern in Self.whisperHallucinationPatterns {
+            if normalized == pattern {
+                return false
+            }
         }
         
         return true

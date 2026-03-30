@@ -160,6 +160,15 @@ class WhisperService {
             return
         }
 
+        // Skip transcription if audio is silent (avoids Whisper hallucinations)
+        if isSilentAudio(samples) {
+            print("Whispered: Audio is silent (RMS below threshold), skipping transcription")
+            DispatchQueue.main.async {
+                completion(.success(""))
+            }
+            return
+        }
+
         // All whisper operations on contextQueue (whisper.cpp is NOT thread-safe)
         contextQueue.async { [weak self] in
             guard let self = self, self.isModelLoaded, let ctx = self.context else {
@@ -211,6 +220,23 @@ class WhisperService {
                 completion(.success(fullText.trimmingCharacters(in: .whitespacesAndNewlines)))
             }
         }
+    }
+
+    /// RMS threshold below which audio is considered silent (~-40 dB)
+    private static let silenceRMSThreshold: Float = 0.01
+
+    /// Detects silence by computing RMS energy of audio samples.
+    /// Returns true if RMS is below threshold, indicating no speech.
+    private func isSilentAudio(_ samples: [Float]) -> Bool {
+        guard !samples.isEmpty else { return true }
+
+        var sumSquares: Float = 0
+        for sample in samples {
+            sumSquares += sample * sample
+        }
+        let rms = sqrtf(sumSquares / Float(samples.count))
+
+        return rms < Self.silenceRMSThreshold
     }
 
     private func readAudioSamples(from url: URL) -> [Float]? {
