@@ -4,7 +4,7 @@ set -e
 # Configuration
 APP_NAME="Whispered"
 BUNDLE_ID="com.whispered.app"
-VERSION="1.5.2"
+VERSION="2.0.0"
 BUILD_DIR=".build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
@@ -76,24 +76,46 @@ if [ -f "Whispered.entitlements" ]; then
     echo "📜 Entitlements added"
 fi
 
-# Find a valid code signing identity, or fall back to ad-hoc
-# Priority: Apple Development > Apple Distribution > ad-hoc
+# Choix de l'identité de signature.
+# Priorite : Developer ID Application (seule acceptee pour la notarisation et
+# donc pour une distribution hors App Store) > Apple Development (suffit en
+# local, et conserve les permissions entre deux builds) > ad-hoc.
 SIGNING_IDENTITY=""
+NOTARIZABLE=0
 
-# Try to find an Apple Development certificate
+DIST_CERT=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 DEV_CERT=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-if [ -n "$DEV_CERT" ]; then
+
+if [ -n "$DIST_CERT" ]; then
+    SIGNING_IDENTITY="$DIST_CERT"
+    NOTARIZABLE=1
+elif [ -n "$DEV_CERT" ]; then
     SIGNING_IDENTITY="$DEV_CERT"
 fi
 
-# Sign the app
 if [ -n "$SIGNING_IDENTITY" ]; then
-    echo "🔏 Signing app with certificate: $SIGNING_IDENTITY"
-    codesign --force --deep --sign "$SIGNING_IDENTITY" --entitlements Whispered.entitlements "$APP_BUNDLE"
+    if [ "$NOTARIZABLE" = "1" ]; then
+        # Runtime durci et horodatage : exiges par la notarisation
+        echo "🔏 Signing for distribution: $SIGNING_IDENTITY"
+        codesign --force --deep --sign "$SIGNING_IDENTITY" \
+            --options runtime --timestamp \
+            --entitlements Whispered.entitlements "$APP_BUNDLE"
+    else
+        echo "🔏 Signing with development certificate: $SIGNING_IDENTITY"
+        codesign --force --deep --sign "$SIGNING_IDENTITY" \
+            --entitlements Whispered.entitlements "$APP_BUNDLE"
+    fi
 else
-    echo "⚠️  No Apple Development certificate found, using ad-hoc signing"
-    echo "   Note: You may need to re-grant permissions after each rebuild"
+    echo "⚠️  No signing certificate found, using ad-hoc signature"
+    echo "   Les permissions Accessibilite et Microphone devront etre re-accordees a chaque build."
     codesign --force --deep --sign - --entitlements Whispered.entitlements "$APP_BUNDLE"
+fi
+
+# Verification : une signature invalide se voit maintenant, pas au premier
+# lancement chez quelqu'un d'autre.
+if ! codesign --verify --strict "$APP_BUNDLE" 2>/dev/null; then
+    echo "❌ Signature invalide" >&2
+    exit 1
 fi
 
 echo "✅ App bundle created: $APP_BUNDLE"

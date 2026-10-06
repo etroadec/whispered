@@ -11,6 +11,7 @@ enum UpdateError: LocalizedError {
     case assetNotFound
     case downloadFailed(String)
     case extractionFailed(String)
+    case verificationFailed(String)
     case installationFailed(String)
     case alreadyUpToDate
     case invalidVersion
@@ -30,6 +31,8 @@ enum UpdateError: LocalizedError {
             return "Échec du téléchargement: \(message)"
         case .extractionFailed(let message):
             return "Échec de l'extraction: \(message)"
+        case .verificationFailed(let message):
+            return "Mise à jour refusée : \(message)"
         case .installationFailed(let message):
             return "Échec de l'installation: \(message)"
         case .alreadyUpToDate:
@@ -68,11 +71,15 @@ struct GitHubAsset: Codable {
     let name: String
     let size: Int
     let browserDownloadUrl: String
+    /// Empreinte publiée par GitHub, de la forme "sha256:abc…". Absente sur les
+    /// releases anciennes : la vérification de signature reste alors le seul filet.
+    let digest: String?
     
     enum CodingKeys: String, CodingKey {
         case name
         case size
         case browserDownloadUrl = "browser_download_url"
+        case digest
     }
 }
 
@@ -84,6 +91,8 @@ struct UpdateInfo {
     let downloadURL: URL
     let fileSize: Int
     let publishedAt: Date?
+    /// Empreinte attendue de l'archive, nil si la release n'en publie pas
+    var expectedDigest: String? = nil
     
     var formattedFileSize: String {
         let formatter = ByteCountFormatter()
@@ -171,12 +180,16 @@ struct SemanticVersion: Comparable {
 
 // MARK: - Update Service
 
-class UpdateService: NSObject {
+/// Partagée entre la file de téléchargement et le main thread ; l'état mutable
+/// (`downloadTask`, `_isCancelled`) est protégé par `stateLock`.
+final class UpdateService: NSObject, @unchecked Sendable {
     static let shared = UpdateService()
     
-    // Configuration
-    private(set) var githubOwner: String = "etroadec"
-    private(set) var githubRepo: String = "whispered"
+    // Configuration. Immuable : elle était modifiable par `configure(owner:repo:)`
+    // mais personne ne l'appelait, et une propriété mutable sur un type partagé
+    // entre threads est une course de données en puissance.
+    let githubOwner: String
+    let githubRepo: String
     
     // State (synchronized via stateLock)
     private let stateLock = NSLock()
@@ -200,24 +213,17 @@ class UpdateService: NSObject {
     private static let logger = Logger(subsystem: "com.whispered", category: "UpdateService")
     
     private override init() {
+        // Surcharge possible depuis UserDefaults, lue une fois à la création
+        let defaults = UserDefaults.standard
+        let owner = defaults.string(forKey: "UpdateGitHubOwner")
+        let repo = defaults.string(forKey: "UpdateGitHubRepo")
+        githubOwner = (owner?.isEmpty == false) ? owner! : "etroadec"
+        githubRepo = (repo?.isEmpty == false) ? repo! : "whispered"
         super.init()
-        
-        // Allow override from UserDefaults (for testing)
-        if let owner = UserDefaults.standard.string(forKey: "UpdateGitHubOwner"), !owner.isEmpty {
-            githubOwner = owner
-        }
-        if let repo = UserDefaults.standard.string(forKey: "UpdateGitHubRepo"), !repo.isEmpty {
-            githubRepo = repo
-        }
     }
     
     // MARK: - Public API
     
-    /// Configure the GitHub repository for updates
-    func configure(owner: String, repo: String) {
-        self.githubOwner = owner
-        self.githubRepo = repo
-    }
     
     /// Get the current app version from Info.plist
     var currentVersion: String {
@@ -227,7 +233,7 @@ class UpdateService: NSObject {
     /// Check for updates without downloading
     func checkForUpdate(
         includePrerelease: Bool = false,
-        completion: @escaping (Result<UpdateInfo?, UpdateError>) -> Void
+        completion: @escaping @Sendable (Result<UpdateInfo?, UpdateError>) -> Void
     ) {
         Self.logger.info("Checking for updates...")
         
@@ -267,8 +273,8 @@ class UpdateService: NSObject {
     /// Download and install an update
     func downloadAndInstall(
         update: UpdateInfo,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         isCancelled = false
         progressHandler = progress
@@ -304,7 +310,7 @@ class UpdateService: NSObject {
                 do {
                     try FileManager.default.copyItem(at: tempURL, to: persistentTempURL)
                     // Continue with extraction and installation
-                    self.extractAndInstall(from: persistentTempURL, progress: progress, completion: completion)
+                    self.extractAndInstall(from: persistentTempURL, update: update, progress: progress, completion: completion)
                 } catch {
                     Self.logger.error("Failed to preserve download: \(error.localizedDescription)")
                     completion(.failure(.downloadFailed("Failed to preserve download: \(error.localizedDescription)")))
@@ -328,7 +334,7 @@ class UpdateService: NSObject {
     
     private func fetchLatestRelease(
         includePrerelease: Bool,
-        completion: @escaping (Result<GitHubRelease, UpdateError>) -> Void
+        completion: @escaping @Sendable (Result<GitHubRelease, UpdateError>) -> Void
     ) {
         let urlString = "https://api.github.com/repos/\(githubOwner)/\(githubRepo)/releases"
         
@@ -419,14 +425,16 @@ class UpdateService: NSObject {
             releaseNotes: release.body,
             downloadURL: downloadURL,
             fileSize: asset.size,
-            publishedAt: publishedDate
+            publishedAt: publishedDate,
+            expectedDigest: asset.digest
         )
     }
     
     private func extractAndInstall(
         from zipURL: URL,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        update: UpdateInfo,
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         progress(UpdateProgress(phase: .extracting, progress: 0.5, bytesDownloaded: 0, totalBytes: 0))
 
@@ -442,6 +450,19 @@ class UpdateService: NSObject {
             } catch {
                 DispatchQueue.main.async {
                     completion(.failure(.extractionFailed(error.localizedDescription)))
+                }
+                return
+            }
+
+            // Empreinte de l'archive avant toute exécution de son contenu
+            do {
+                try UpdateVerifier.verifyDigest(update.expectedDigest, of: zipURL)
+            } catch {
+                try? FileManager.default.removeItem(at: zipURL)
+                try? FileManager.default.removeItem(at: tempDir)
+                Self.logger.error("Empreinte invalide, installation abandonnée")
+                DispatchQueue.main.async {
+                    completion(.failure(.verificationFailed(error.localizedDescription)))
                 }
                 return
             }
@@ -485,6 +506,21 @@ class UpdateService: NSObject {
 
             Self.logger.info("Extracted app: \(appBundle.lastPathComponent)")
 
+            // Signature valide, et même signataire que l'app en cours
+            do {
+                try UpdateVerifier.verifySignature(
+                    of: appBundle,
+                    hasPublishedDigest: update.expectedDigest?.isEmpty == false
+                )
+            } catch {
+                try? FileManager.default.removeItem(at: tempDir)
+                Self.logger.error("Signature refusée, installation abandonnée")
+                DispatchQueue.main.async {
+                    completion(.failure(.verificationFailed(error.localizedDescription)))
+                }
+                return
+            }
+
             // Install the app (retour sur main thread)
             DispatchQueue.main.async {
                 self.installApp(from: appBundle, tempDir: tempDir, progress: progress, completion: completion)
@@ -522,12 +558,36 @@ class UpdateService: NSObject {
     }
     
     private func installApp(
-        from newAppURL: URL,
+        from extractedAppURL: URL,
         tempDir: URL,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         progress(UpdateProgress(phase: .installing, progress: 0.8, bytesDownloaded: 0, totalBytes: 0))
+
+        // Le nom du bundle vient de l'archive téléchargée : c'est une donnée
+        // distante. L'installation privilégiée construit un script shell avec ce
+        // chemin, donc un nom contenant un guillemet ou un antislash sortait du
+        // littéral et exécutait du code en tant qu'administrateur. On le renomme
+        // sous un nom que l'app contrôle entièrement avant tout usage.
+        let newAppURL: URL
+        if extractedAppURL.lastPathComponent == "Whispered.app" {
+            newAppURL = extractedAppURL
+        } else {
+            let normalized = tempDir.appendingPathComponent("Whispered.app")
+            do {
+                try? FileManager.default.removeItem(at: normalized)
+                try FileManager.default.moveItem(at: extractedAppURL, to: normalized)
+                Self.logger.notice("Bundle renommé : \(extractedAppURL.lastPathComponent, privacy: .public) → Whispered.app")
+                newAppURL = normalized
+            } catch {
+                try? FileManager.default.removeItem(at: tempDir)
+                DispatchQueue.main.async {
+                    completion(.failure(.installationFailed(error.localizedDescription)))
+                }
+                return
+            }
+        }
         
         // Get the current app's location
         let currentAppURL = Bundle.main.bundleURL
@@ -562,8 +622,8 @@ class UpdateService: NSObject {
         from newAppURL: URL,
         to targetURL: URL,
         tempDir: URL,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         let fileManager = FileManager.default
 
@@ -631,19 +691,31 @@ class UpdateService: NSObject {
         }
     }
     
-    /// Échappe un path pour utilisation dans un shell script single-quoted
+    /// Échappe un path pour un shell script entre apostrophes simples
     private func shellEscape(_ path: String) -> String {
-        // Dans un string single-quoted en shell, seul ' doit être échappé
-        // On ferme le single quote, on ajoute un single quote échappé, on rouvre
-        return path.replacingOccurrences(of: "'", with: "'\"'\"'")
+        path.replacingOccurrences(of: "'", with: "'\"'\"'")
+    }
+
+    /// Un chemin acceptable dans le script privilégié : lettres, chiffres, et
+    /// quelques séparateurs. Tout le reste est refusé plutôt qu'échappé — le
+    /// script traverse AppleScript **puis** le shell, deux niveaux de citation
+    /// où une seule erreur donne une exécution de code en administrateur.
+    private static let safePathCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./ "
+    )
+
+    private func isSafeForPrivilegedScript(_ path: String) -> Bool {
+        !path.isEmpty
+            && path.unicodeScalars.allSatisfy { Self.safePathCharacters.contains($0) }
+            && !path.contains("..")
     }
 
     private func performAuthorizedInstall(
         from newAppURL: URL,
         to targetURL: URL,
         tempDir: URL,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         // Use AppleScript to request admin privileges
         // This shows the standard macOS authorization dialog
@@ -651,7 +723,21 @@ class UpdateService: NSObject {
         let backupPath = targetURL.deletingLastPathComponent()
             .appendingPathComponent("\(targetURL.deletingPathExtension().lastPathComponent)_backup.app").path
 
-        // Échapper tous les paths pour éviter l'injection de commandes
+        // Dernier verrou avant une commande administrateur : tout chemin
+        // inattendu fait échouer la mise à jour au lieu d'être échappé.
+        for path in [backupPath, targetURL.path, newAppURL.path] {
+            guard isSafeForPrivilegedScript(path) else {
+                Self.logger.error("Chemin refusé pour l'installation privilégiée")
+                try? FileManager.default.removeItem(at: tempDir)
+                DispatchQueue.main.async {
+                    completion(.failure(.verificationFailed(
+                        "un chemin d'installation contient des caractères inattendus"
+                    )))
+                }
+                return
+            }
+        }
+
         let escapedBackupPath = shellEscape(backupPath)
         let escapedTargetPath = shellEscape(targetURL.path)
         let escapedNewAppPath = shellEscape(newAppURL.path)
@@ -716,8 +802,8 @@ class UpdateService: NSObject {
     
     private func restartApp(
         at appURL: URL,
-        progress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, UpdateError>) -> Void
+        progress: @escaping @Sendable (UpdateProgress) -> Void,
+        completion: @escaping @Sendable (Result<Void, UpdateError>) -> Void
     ) {
         progress(UpdateProgress(phase: .restarting, progress: 1.0, bytesDownloaded: 0, totalBytes: 0))
 

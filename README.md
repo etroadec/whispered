@@ -1,24 +1,25 @@
 # Whispered
 
-Application macOS de transcription vocale locale, basée sur [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+Application macOS de dictée vocale locale, basée sur [whisper.cpp](https://github.com/ggml-org/whisper.cpp) et le modèle [Parakeet TDT v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) de NVIDIA.
 
-**100% hors ligne** - Vos données audio ne quittent jamais votre Mac.
+**100 % hors ligne** - Vos données audio ne quittent jamais votre Mac.
 
 ## Fonctionnalités
 
-- Transcription vocale en temps réel
-- Fonctionne entièrement hors ligne (après téléchargement du modèle)
-- Accélération Metal GPU + Neural Engine (Apple Silicon)
-- Détection automatique de la langue
-- Injection du texte dans le champ actif
-- Interface minimaliste dans la barre de menu
-- Choix du modèle Whisper (Tiny, Base, Small, Medium, Large V3)
-- **Popup personnalisable** : mode Standard ou Compact
-- **Mises à jour automatiques** depuis GitHub
+- Dictée instantanée : **50 ms de transcription pour 3 s de parole** sur Apple Silicon
+- Deux moteurs : **Parakeet TDT v3** (défaut, 25 langues européennes, détection automatique) et **whisper large-v3-turbo** (99 langues, traduction)
+- Fonctionne entièrement hors ligne après téléchargement du modèle
+- Détection de parole Silero : aucune transcription sur du silence, aucune hallucination
+- Insertion dans le champ actif par l'API d'accessibilité, repli presse-papier, détection de la saisie sécurisée
+- Historique des 50 dernières dictées, cherchable, avec réinsertion
+- Dictionnaire de corrections pour les noms propres et le jargon
+- Onde du micro affichée pendant la dictée
+- Second raccourci configurable : autre moteur, copie seule, ou réinsertion
+- Mises à jour automatiques depuis GitHub, vérifiées par empreinte et signature
 
 ## Prérequis
 
-- macOS 14.0 ou supérieur
+- macOS 14.0 ou supérieur, **Mac Apple Silicon** (M1 ou plus récent)
 - Xcode Command Line Tools
 - CMake
 
@@ -100,19 +101,23 @@ make download-all
 
 ## Modèles disponibles
 
-| Modèle | Taille | Précision | Vitesse |
-|--------|--------|-----------|---------|
-| Tiny | ~75 MB | ⭐ | Très rapide |
-| Base | ~150 MB | ⭐⭐ | Rapide |
-| Small | ~500 MB | ⭐⭐⭐ | Moyen |
-| Medium | ~1.5 GB | ⭐⭐⭐⭐ | Lent |
-| **Large V3 Turbo Q5** | ~574 MB | ⭐⭐⭐⭐ | Rapide |
-| Large V3 Turbo | ~1.6 GB | ⭐⭐⭐⭐⭐ | Moyen |
-| Large V3 Q5 | ~1.1 GB | ⭐⭐⭐⭐⭐ | Lent |
+| Modèle | Taille | Moteur | Pour quoi |
+|--------|--------|--------|-----------|
+| **Parakeet v3** (défaut) | 638 Mo | Parakeet | Le plus rapide et le plus précis en français. 25 langues européennes, détection automatique. |
+| Parakeet v3 léger | 396 Mo | Parakeet | Même vitesse, 240 Mo de moins. |
+| Whisper large-v3-turbo Q5 | 547 Mo | whisper.cpp | 99 langues et traduction vers l'anglais. Plus lent, meilleur sur le jargon anglais. |
+| Silero VAD | 0,8 Mo | — | Détection de parole, téléchargé automatiquement. |
 
-> **Recommandation** : Le modèle **Large V3 Turbo Q5** offre le meilleur rapport qualité/vitesse sur Apple Silicon.
+Mesuré sur un MacBook M5, extrait de français de 3,2 s, modèle déjà chargé :
 
-Les modèles sont téléchargés depuis [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) et stockés dans :
+| Moteur | Latence | Remarque |
+|--------|---------|----------|
+| Parakeet v3 q8_0 | **50 ms** | coût proportionnel à la durée de l'audio |
+| whisper large-v3-turbo | 710 ms | coût fixe : Whisper complète toujours une fenêtre de 30 s |
+
+> Les modèles Tiny, Base, Small, Medium et Large V3 ont été retirés en v2.0 : tous dominés en qualité comme en vitesse par les deux restants. Les préférences proposent de récupérer la place qu'ils occupent.
+
+Les modèles sont téléchargés depuis [Hugging Face](https://huggingface.co/ggml-org/parakeet-GGUF) et stockés dans :
 ```
 ~/Library/Application Support/Whispered/models/
 ```
@@ -138,9 +143,11 @@ macOS vous demandera ces permissions au premier lancement.
 | `make bundle` | Crée le bundle `.app` |
 | `make install` | Installe dans `/Applications` |
 | `make run` | Lance l'application (mode développement) |
-| `make download-model` | Télécharge le modèle Base |
-| `make download-coreml` | Télécharge le modèle CoreML Base |
-| `make download-all` | Télécharge Base + CoreML |
+| `make sync-headers` | Recopie les en-têtes du submodule dans `WhisperCpp/include` |
+| `make download-model` | Télécharge Parakeet TDT v3 q8_0 (638 Mo) |
+| `make download-vad` | Télécharge Silero VAD (0,8 Mo) |
+| `make download-whisper` | Télécharge whisper large-v3-turbo Q5 (547 Mo) |
+| `make download-all` | Télécharge les trois |
 | `make clean` | Supprime les fichiers de build |
 | `make help` | Affiche l'aide |
 
@@ -151,7 +158,7 @@ whispered/
 ├── Whispered/                # Application Swift
 │   ├── App/                  # Point d'entrée et AppDelegate
 │   ├── Views/                # Interface SwiftUI
-│   ├── Services/             # Audio, Whisper, Hotkey, TextInjector
+│   ├── Services/             # Moteurs, audio, VAD, raccourcis, insertion
 │   └── Models/               # Modèles de données
 ├── WhisperCpp/               # Wrapper whisper.cpp
 │   ├── whisper.cpp/          # Submodule Git
@@ -165,16 +172,9 @@ whispered/
 
 ## Optimisations Apple Silicon
 
-Sur les Mac avec puce Apple (M1, M2, M3, M4, M5), l'application utilise :
+Les deux moteurs tournent sur **Metal**, avec **Accelerate** pour le calcul vectoriel. Le build est arm64 uniquement.
 
-- **Metal GPU** : Calcul parallèle sur le GPU
-- **CoreML** : Accélération via le Neural Engine
-- **Accelerate** : Framework Apple optimisé pour le calcul vectoriel
-
-Pour bénéficier du Neural Engine, téléchargez aussi les modèles CoreML :
-```bash
-make download-coreml
-```
+CoreML a été retiré en v2.0 : l'encodeur n'était jamais téléchargé par l'application (il fallait passer par `make`), Parakeet n'a pas de chemin Neural Engine dans whisper.cpp, et Metal seul suffit — 50 ms pour 3 s d'audio.
 
 ## Dépannage
 
@@ -285,6 +285,42 @@ Pour publier une mise à jour sur GitHub :
 L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
+
+### v2.0.0
+
+**Moteur :**
+- **Parakeet TDT 0.6B v3 comme moteur par défaut** : 50 ms pour 3 s de parole au lieu de 710 ms, meilleure ponctuation, 638 Mo au lieu de 1,6 Go, détection de langue automatique
+- Submodule whisper.cpp porté en v1.9.4, qui apporte le support natif de Parakeet
+- Catalogue réduit à 3 entrées : Tiny, Base, Small, Medium et Large V3 retirés
+- **Détection de parole Silero (VAD)** à la place du seuil d'énergie global : rogne les blancs et n'invente rien sur du silence
+- CoreML et la tranche x86_64 retirés du build ; cible de déploiement des bibliothèques alignée sur macOS 14
+
+**Corrections :**
+- Les dictées « merci beaucoup », « au revoir », « thank you » n'étaient jamais insérées : la liste noire anti-hallucination les confondait avec du bruit. Remplacée par le VAD et un filtre de répétitions
+- L'encodeur CoreML annoncé dans les préférences n'était jamais téléchargé : le Neural Engine n'était donc jamais utilisé
+- Le téléchargement d'un modèle de 1,6 Go n'affichait aucune progression et ne pouvait pas être annulé
+- Le presse-papier pouvait rester écrasé après une insertion ; son contenu complet est maintenant restauré, images et fichiers inclus
+- Dans un champ de mot de passe, l'app annonçait « Transcrit ! » alors que rien n'était inséré
+- Plus d'écriture de WAV sur le disque ni d'attente arbitraire de 0,1 s : la capture reste en mémoire
+- ⌘ gauche et ⌘ droite n'étaient plus confondues (masques dépendants du périphérique)
+- La fenêtre de préférences était tronquée (contenu de 950 px dans une fenêtre de 850)
+
+**Nouveau :**
+- **Texte affiché pendant que tu parles** (macOS 26) : le moteur de transcription du système écrit dans le popup au fil de la parole, environ 30 ms après chaque mot. Le texte inséré reste celui de Parakeet, plus fidèle.
+- **Réécriture par le modèle de langue de macOS** : nettoyer la ponctuation et les hésitations, passer du parlé à l'écrit, ou traduire en anglais — en local, sur le second raccourci. Demande Apple Intelligence activé.
+- Dictée possible dès le premier lancement, via le moteur du système, pendant que le modèle se télécharge
+- Historique des 50 dernières dictées, cherchable, avec réinsertion et copie
+- Dictionnaire de corrections éditable, appliqué après transcription
+- Onde du micro réelle dans le popup
+- Modes d'insertion : insérer, copier seulement, ajouter à la suite
+- Second raccourci configurable (autre moteur, copie seule, réinsertion)
+- Arrêt automatique sur silence en mode « appuyer »
+- Fenêtre de premier lancement : permissions, langue, raccourci
+- Préférences réorganisées en onglets
+- Mises à jour vérifiées par empreinte SHA-256 et signature du bundle
+- Téléchargements reprenables : une connexion coupée ne fait pas repartir 638 Mo de zéro
+- `make release` produit l'archive et son empreinte, `make notarize` la soumet à Apple
+- Le micro non autorisé, ou changé en pleine dictée (casque branché), est signalé au lieu d'enregistrer du silence
 
 ### v1.5.0
 
