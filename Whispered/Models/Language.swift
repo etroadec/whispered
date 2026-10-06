@@ -47,8 +47,11 @@ extension Language {
 
 // MARK: - Favorite Languages Manager
 
-/// Gestionnaire des langues favorites (thread-safe)
-final class FavoriteLanguagesManager {
+/// Langues favorites, rangées dans `UserDefaults`.
+///
+/// `@unchecked Sendable` : la seule donnée est dans `UserDefaults`, lui-même
+/// thread-safe ; l'objet n'a aucun état propre.
+final class FavoriteLanguagesManager: @unchecked Sendable {
     static let shared = FavoriteLanguagesManager()
 
     private let favoritesKey = "favoriteLanguages"
