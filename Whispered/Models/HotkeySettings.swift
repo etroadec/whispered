@@ -18,8 +18,10 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
     case leftShift = "leftShift"
 
     // Touches spéciales
+    // Caps Lock est volontairement absent : son drapeau reste positionné après
+    // le relâchement, donc en mode « maintenir » l'enregistrement ne s'arrêtait
+    // jamais au relâchement de la touche.
     case fn = "fn"
-    case capsLock = "capsLock"
 
     // Touches de fonction
     case f1 = "f1"
@@ -44,7 +46,7 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
             return "Touches droites"
         case .leftCommand, .leftOption, .leftControl, .leftShift:
             return "Touches gauches"
-        case .fn, .capsLock:
+        case .fn:
             return "Touches spéciales"
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return "Touches de fonction"
@@ -63,7 +65,6 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
         case .leftControl: return "⌃ Control gauche"
         case .leftShift: return "⇧ Shift gauche"
         case .fn: return "fn Function"
-        case .capsLock: return "⇪ Caps Lock"
         case .f1: return "F1"
         case .f2: return "F2"
         case .f3: return "F3"
@@ -87,7 +88,6 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
         case .rightControl, .leftControl: return "⌃"
         case .rightShift, .leftShift: return "⇧"
         case .fn: return "fn"
-        case .capsLock: return "⇪"
         case .f1: return "F1"
         case .f2: return "F2"
         case .f3: return "F3"
@@ -115,7 +115,6 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
         case .leftControl: return "⌃ gauche"
         case .leftShift: return "⇧ gauche"
         case .fn: return "fn"
-        case .capsLock: return "⇪ Caps Lock"
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return symbol
         }
@@ -133,7 +132,6 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
         case .leftControl: return 0x3B   // kVK_Control
         case .leftShift: return 0x38     // kVK_Shift
         case .fn: return 0x3F            // kVK_Function
-        case .capsLock: return 0x39      // kVK_CapsLock
         case .f1: return 0x7A            // kVK_F1
         case .f2: return 0x78            // kVK_F2
         case .f3: return 0x63            // kVK_F3
@@ -157,7 +155,6 @@ enum HotkeyChoice: String, CaseIterable, Identifiable {
         case .rightControl, .leftControl: return .maskControl
         case .rightShift, .leftShift: return .maskShift
         case .fn: return .maskSecondaryFn
-        case .capsLock: return .maskAlphaShift
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return nil  // Les touches F n'ont pas de mask, on utilise keyDown/keyUp
         }
@@ -208,51 +205,132 @@ enum RecordingMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Second raccourci
+
+/// Ce que déclenche le second raccourci, quand il est défini.
+enum SecondaryAction: String, CaseIterable, Identifiable {
+    /// Dicter avec l'autre moteur que celui par défaut (rapide ↔ soigné)
+    case alternateEngine
+    /// Dicter sans insérer : le texte va seulement dans le presse-papier
+    case clipboardOnly
+    /// Dicter puis faire réécrire par le modèle de langue du système
+    case reformulate
+    /// Réinsérer la dernière dictée
+    case repeatLast
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .alternateEngine: return "Dicter avec l'autre moteur"
+        case .clipboardOnly: return "Dicter vers le presse-papier"
+        case .reformulate: return "Dicter et faire réécrire"
+        case .repeatLast: return "Réinsérer la dernière dictée"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .alternateEngine:
+            return "Même geste, l'autre moteur : l'instantané pour un message, le soigné pour du jargon."
+        case .clipboardOnly:
+            return "Utile quand le champ visé refuse l'insertion automatique."
+        case .reformulate:
+            return "Le modèle de langue de macOS nettoie ou réécrit la dictée avant insertion. Demande Apple Intelligence activé."
+        case .repeatLast:
+            return "Recolle le dernier texte transcrit, sans réenregistrer."
+        }
+    }
+}
+
 // MARK: - Settings Manager
 
-/// Gestionnaire centralise des preferences de raccourcis (thread-safe)
-final class HotkeySettingsManager {
+/// Préférences de raccourcis.
+///
+/// Pas de file de synchronisation : `UserDefaults` est déjà thread-safe, et ces
+/// accesseurs sont lus à chaque événement clavier — une barrière de file par
+/// frappe ne protégeait rien et coûtait une synchronisation.
+final class HotkeySettingsManager: @unchecked Sendable {
     static let shared = HotkeySettingsManager()
 
     private let hotkeyChoiceKey = "hotkeyChoice"
     private let recordingModeKey = "recordingMode"
-    private let queue = DispatchQueue(label: "com.whispered.hotkeySettings", attributes: .concurrent)
-
+    private let secondaryHotkeyKey = "secondaryHotkeyChoice"
+    private let secondaryActionKey = "secondaryAction"
+    private let reformulationStyleKey = "reformulationStyle"
     private init() {}
 
     var hotkeyChoice: HotkeyChoice {
         get {
-            queue.sync {
                 guard let raw = UserDefaults.standard.string(forKey: hotkeyChoiceKey),
                       let choice = HotkeyChoice(rawValue: raw) else {
                     return .rightCommand
                 }
                 return choice
-            }
         }
         set {
-            queue.async(flags: .barrier) { [self] in
                 UserDefaults.standard.set(newValue.rawValue, forKey: hotkeyChoiceKey)
                 postNotificationOnMainThread(.hotkeySettingsDidChange)
-            }
         }
     }
 
     var recordingMode: RecordingMode {
         get {
-            queue.sync {
                 guard let raw = UserDefaults.standard.string(forKey: recordingModeKey),
                       let mode = RecordingMode(rawValue: raw) else {
                     return .hold
                 }
                 return mode
-            }
         }
         set {
-            queue.async(flags: .barrier) { [self] in
                 UserDefaults.standard.set(newValue.rawValue, forKey: recordingModeKey)
                 postNotificationOnMainThread(.hotkeySettingsDidChange)
-            }
+        }
+    }
+
+    /// Second raccourci, nil si aucun n'est défini.
+    /// Il ne peut pas être identique au raccourci principal : le tap clavier ne
+    /// saurait pas lequel des deux déclencher.
+    var secondaryHotkeyChoice: HotkeyChoice? {
+        get {
+                guard let raw = UserDefaults.standard.string(forKey: secondaryHotkeyKey),
+                      let choice = HotkeyChoice(rawValue: raw) else {
+                    return nil
+                }
+                return choice
+        }
+        set {
+                if let newValue, newValue.rawValue != UserDefaults.standard.string(forKey: hotkeyChoiceKey) {
+                    UserDefaults.standard.set(newValue.rawValue, forKey: secondaryHotkeyKey)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: secondaryHotkeyKey)
+                }
+                postNotificationOnMainThread(.hotkeySettingsDidChange)
+        }
+    }
+
+    var secondaryAction: SecondaryAction {
+        get {
+                guard let raw = UserDefaults.standard.string(forKey: secondaryActionKey),
+                      let action = SecondaryAction(rawValue: raw) else {
+                    return .alternateEngine
+                }
+                return action
+        }
+        set {
+                UserDefaults.standard.set(newValue.rawValue, forKey: secondaryActionKey)
+                postNotificationOnMainThread(.hotkeySettingsDidChange)
+        }
+    }
+
+    /// Style de réécriture appliqué par l'action « Dicter et faire réécrire »
+    var reformulationStyle: String {
+        get {
+                UserDefaults.standard.string(forKey: reformulationStyleKey) ?? "clean"
+        }
+        set {
+                UserDefaults.standard.set(newValue, forKey: reformulationStyleKey)
+                postNotificationOnMainThread(.hotkeySettingsDidChange)
         }
     }
 

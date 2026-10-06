@@ -1,44 +1,34 @@
 import Foundation
 import SwiftUI
 
-class RecordingState: ObservableObject {
+/// État partagé entre l'AppDelegate et le popup d'enregistrement.
+@MainActor
+final class RecordingState: ObservableObject {
     @Published var isRecording = false
     @Published var statusText = "Prêt"
     @Published var lastTranscription = ""
-    @Published var audioLevel: Float = 0.0
-}
 
-struct TranscriptionResult {
-    let text: String
-    let language: String?
-    let duration: TimeInterval
-}
+    /// Texte en cours de construction pendant la dictée, quand le moteur
+    /// système est activé : il donne un premier mot 26 ms après la parole.
+    @Published var liveText = ""
 
-enum WhisperError: LocalizedError {
-    case modelNotFound
-    case modelLoadFailed
-    case transcriptionFailed
-    case audioReadFailed
-    case downloadFailed(String)
-    case cannotDeleteActiveModel
-    case deleteFailed(String)
+    /// Niveau du micro normalisé entre 0 et 1, le plus récent en dernier.
+    /// Alimenté pendant l'enregistrement pour dessiner l'onde : sans ce retour,
+    /// un micro muet ou mal sélectionné ne se voit qu'après la dictée.
+    @Published var levels: [Float] = []
 
-    var errorDescription: String? {
-        switch self {
-        case .modelNotFound:
-            return "Modèle Whisper non trouvé. Téléchargez-le d'abord."
-        case .modelLoadFailed:
-            return "Impossible de charger le modèle Whisper."
-        case .transcriptionFailed:
-            return "La transcription a échoué."
-        case .audioReadFailed:
-            return "Impossible de lire le fichier audio."
-        case .downloadFailed(let message):
-            return "Téléchargement échoué: \(message)"
-        case .cannotDeleteActiveModel:
-            return "Impossible de supprimer le modèle actif. Changez de modèle d'abord."
-        case .deleteFailed(let message):
-            return "Suppression échouée: \(message)"
+    /// Nombre de barres affichées par l'onde
+    static let levelCount = 44
+
+    func appendLevel(_ level: Float) {
+        let clamped = min(max(level, 0), 1)
+        levels.append(clamped)
+        if levels.count > Self.levelCount {
+            levels.removeFirst(levels.count - Self.levelCount)
         }
+    }
+
+    func resetLevels() {
+        levels.removeAll()
     }
 }

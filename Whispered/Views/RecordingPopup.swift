@@ -5,18 +5,18 @@ import SwiftUI
 enum PopupMode: String, CaseIterable {
     case standard = "standard"
     case compact = "compact"
-    
+
     var displayName: String {
         switch self {
         case .standard: return "Standard"
         case .compact: return "Compact"
         }
     }
-    
+
     var size: NSSize {
         switch self {
-        case .standard: return NSSize(width: 280, height: 220)
-        case .compact: return NSSize(width: 220, height: 80)
+        case .standard: return NSSize(width: 300, height: 200)
+        case .compact: return NSSize(width: 240, height: 76)
         }
     }
 }
@@ -26,171 +26,108 @@ enum PopupMode: String, CaseIterable {
 struct RecordingPopup: View {
     @ObservedObject var state: RecordingState
     let mode: PopupMode
-    
+
     var body: some View {
-        Group {
-            switch mode {
-            case .standard:
-                StandardPopupContent(state: state)
-            case .compact:
-                CompactPopupContent(state: state)
-            }
+        switch mode {
+        case .standard:
+            StandardPopupContent(state: state)
+        case .compact:
+            CompactPopupContent(state: state)
         }
     }
 }
 
-// MARK: - Hotkey Hint Helper
+// MARK: - Rappel du raccourci
 
 private struct HotkeyHintHelper {
-    static var currentHotkey: HotkeyChoice {
-        HotkeySettingsManager.shared.hotkeyChoice
-    }
-    
-    static var currentMode: RecordingMode {
-        HotkeySettingsManager.shared.recordingMode
-    }
-    
     static var recordHint: String {
-        let key = currentHotkey.fullDescription
-        switch currentMode {
-        case .hold:
-            return "Maintenez \(key) pour enregistrer"
-        case .toggle:
-            return "Appuyez sur \(key) pour enregistrer"
+        let key = HotkeySettingsManager.shared.hotkeyChoice.fullDescription
+        switch HotkeySettingsManager.shared.recordingMode {
+        case .hold: return "Maintenez \(key) pour dicter"
+        case .toggle: return "Appuyez sur \(key) pour dicter"
         }
     }
-    
+
     static var stopHint: String {
-        let key = currentHotkey.fullDescription
-        switch currentMode {
-        case .hold:
-            return "\(key) pour arreter"
-        case .toggle:
-            return "\(key) pour arreter"
-        }
+        "\(HotkeySettingsManager.shared.hotkeyChoice.fullDescription) pour arrêter"
     }
 }
 
-// MARK: - Standard Mode (Full)
+// MARK: - Mode standard
 
 struct StandardPopupContent: View {
     @ObservedObject var state: RecordingState
-    @State private var animationAmount = 1.0
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            
-            // Micro avec animation
-            ZStack {
-                Circle()
-                    .stroke(state.isRecording ? Color.red.opacity(0.3) : Color.gray.opacity(0.2), lineWidth: 2)
-                    .frame(width: 80, height: 80)
-                
-                if state.isRecording {
-                    Circle()
-                        .stroke(Color.red.opacity(0.5), lineWidth: 4)
-                        .frame(width: 80, height: 80)
-                        .scaleEffect(animationAmount)
-                        .opacity(2 - animationAmount)
-                        .animation(
-                            .easeInOut(duration: 1)
-                                .repeatForever(autoreverses: false),
-                            value: animationAmount
-                        )
-                }
-                
-                Image(systemName: state.isRecording ? "mic.fill" : "mic")
-                    .font(.system(size: 30))
-                    .foregroundColor(state.isRecording ? .red : .primary)
+        VStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: state.isRecording ? "mic.fill" : "waveform")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(state.isRecording ? .red : .secondary)
+                    .symbolEffect(.pulse, isActive: state.isRecording)
+
+                Text(state.statusText)
+                    .font(.system(size: 14, weight: .semibold))
+
+                Spacer()
             }
-            .onAppear {
-                animationAmount = 2.0
-            }
-            
-            Spacer()
-                .frame(height: 20)
-            
-            // Statut
-            Text(state.statusText)
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            Spacer()
-                .frame(height: 12)
-            
-            // Zone de texte secondaire
+
+            WaveformView(levels: state.levels, isActive: state.isRecording)
+                .frame(height: 56)
+
+            // Texte en direct pendant la dictée, dernier texte ensuite,
+            // rappel du raccourci au repos
             Group {
-                if !state.lastTranscription.isEmpty && !state.isRecording && state.statusText != "Pret" {
+                if state.isRecording && !state.liveText.isEmpty {
+                    Text(state.liveText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if !state.lastTranscription.isEmpty && !state.isRecording {
                     Text(state.lastTranscription)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Text(HotkeyHintHelper.recordHint)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text(state.isRecording ? HotkeyHintHelper.stopHint : HotkeyHintHelper.recordHint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(height: 32)
-            .padding(.horizontal, 16)
-            
-            Spacer()
+            .frame(height: 46, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-// MARK: - Compact Mode (Mini)
+// MARK: - Mode compact
 
 struct CompactPopupContent: View {
     @ObservedObject var state: RecordingState
-    @State private var animationAmount = 1.0
-    
+
     var body: some View {
-        HStack(spacing: 14) {
-            // Micro compact avec animation
-            ZStack {
-                Circle()
-                    .stroke(state.isRecording ? Color.red.opacity(0.3) : Color.gray.opacity(0.2), lineWidth: 2)
-                    .frame(width: 44, height: 44)
-                
-                if state.isRecording {
-                    Circle()
-                        .stroke(Color.red.opacity(0.5), lineWidth: 2)
-                        .frame(width: 44, height: 44)
-                        .scaleEffect(animationAmount)
-                        .opacity(2 - animationAmount)
-                        .animation(
-                            .easeInOut(duration: 1)
-                                .repeatForever(autoreverses: false),
-                            value: animationAmount
-                        )
-                }
-                
-                Image(systemName: state.isRecording ? "mic.fill" : "mic")
-                    .font(.system(size: 18))
-                    .foregroundColor(state.isRecording ? .red : .primary)
-            }
-            .onAppear {
-                animationAmount = 2.0
-            }
-            
-            // Statut texte
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            Image(systemName: state.isRecording ? "mic.fill" : "waveform")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(state.isRecording ? .red : .secondary)
+                .symbolEffect(.pulse, isActive: state.isRecording)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(state.statusText)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                
-                Text(HotkeyHintHelper.stopHint)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+
+                WaveformView(levels: state.levels, isActive: state.isRecording)
+                    .frame(height: 22)
             }
-            
-            Spacer()
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
