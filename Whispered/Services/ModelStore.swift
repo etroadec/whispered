@@ -76,12 +76,14 @@ final class ModelStore: NSObject, ObservableObject {
 
     // MARK: - Emplacements
 
-    nonisolated static var modelsDirectory: URL {
+    /// Calculé une fois : c'était un getter qui créait le répertoire à chaque
+    /// accès, soit un `mkdir` par modèle et par ouverture de menu.
+    nonisolated static let modelsDirectory: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = appSupport.appendingPathComponent("Whispered/models", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
     nonisolated static func path(for model: TranscriptionModel) -> URL {
         modelsDirectory.appendingPathComponent(model.fileName)

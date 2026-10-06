@@ -1,6 +1,17 @@
 import ServiceManagement
 import SwiftUI
 
+/// Onglet affiché par la fenêtre de préférences.
+///
+/// Partagé et observable : la fenêtre est créée une seule fois, et le menu
+/// change d'onglet en écrivant ici. La recréer détruisait l'état SwiftUI —
+/// une mise à jour en cours perdait sa barre de progression et son bouton
+/// « Annuler » tout en continuant à s'installer en silence.
+@MainActor
+final class SettingsSelection: ObservableObject {
+    @Published var tab: SettingsView.Tab = .general
+}
+
 /// Préférences, découpées en onglets façon macOS.
 ///
 /// Avant : un seul formulaire déclaré en 500×950 dans une fenêtre dimensionnée
@@ -33,10 +44,14 @@ struct SettingsView: View {
         }
     }
 
-    @State private var selection: Tab = .general
+    @ObservedObject var selection: SettingsSelection
+
+    init(selection: SettingsSelection) {
+        self.selection = selection
+    }
 
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: $selection.tab) {
             ForEach(Tab.allCases) { tab in
                 content(for: tab)
                     .tabItem { Label(tab.title, systemImage: tab.icon) }

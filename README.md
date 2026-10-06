@@ -286,6 +286,28 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
 
+### v2.1.0
+
+**Menu de la barre des menus revu :**
+- Le niveau supérieur ne garde que les actions — dicter, réinsérer, historique — et tous les réglages passent en sous-menu : **Moteur**, **Langue**, **Insertion**. Avant, le choix de langue s'alignait au même niveau que « Quitter ».
+- **Changer de moteur sans ouvrir les préférences** : c'est le réglage le plus souvent touché selon qu'on dicte une phrase courte ou du jargon technique.
+- L'en-tête indique le moteur actif, ou l'état en cours (« À l'écoute… », « Transcription… »).
+- Ce qui bloque l'app apparaît en haut et se règle d'un clic : permission manquante, aucun modèle installé, téléchargement en cours avec son pourcentage.
+- « Dicter » devient « Arrêter la dictée » pendant l'enregistrement.
+- Aperçu de la dernière dictée limité à 44 caractères : il allait jusqu'à 80 et étirait le menu sur la moitié de l'écran.
+- Les préférences s'ouvrent directement sur l'onglet concerné.
+- Le sous-menu Langue explique pourquoi il est inactif sous Parakeet, qui reconnaît la langue tout seul, au lieu de proposer un choix sans effet.
+- Le moteur ne peut plus être changé en pleine dictée : l'audio déjà capturé serait transcrit par l'autre moteur.
+
+**Corrections trouvées en relecture :**
+- Le menu est désormais confié à AppKit (`NSMenuDelegate`) au lieu d'être posé juste avant un clic simulé : il s'ouvre au mouse-down comme les autres extras de la barre des menus, le clic droit et la navigation clavier fonctionnent, et le pourcentage de téléchargement s'actualise pendant que le menu est ouvert.
+- « Dicter » était grisé au premier lancement alors que le raccourci, lui, fonctionnait grâce au moteur du système.
+- Avec Whisper choisi mais pas encore téléchargé, le menu affirmait que la langue était détectée automatiquement — alors que le choix s'appliquait bel et bien.
+- Ouvrir les préférences depuis le menu recréait la fenêtre : une mise à jour en cours perdait sa barre de progression et son bouton « Annuler » tout en continuant à s'installer.
+- Un changement de langue déclenchait trois rafraîchissements concurrents du format audio, sans garantie d'ordre : la transcription en direct pouvait s'arrêter sans message.
+- Le dossier des modèles était recréé à chaque vérification de présence, soit un appel système par modèle et par ouverture de menu.
+- Accents rétablis dans les noms de langues.
+
 ### v2.0.1
 
 **Correction :**

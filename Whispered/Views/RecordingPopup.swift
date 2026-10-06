@@ -1,5 +1,10 @@
 import SwiftUI
 
+extension Notification.Name {
+    /// Postée quand la taille du popup change dans les préférences.
+    static let popupModeDidChange = Notification.Name("popupModeDidChange")
+}
+
 // MARK: - Popup Mode Enum
 
 enum PopupMode: String, CaseIterable {

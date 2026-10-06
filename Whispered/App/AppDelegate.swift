@@ -9,8 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPanel: NSPanel?
     private var hotkeyManager: HotkeyManager?
     private let recordingState = RecordingState()
+    private lazy var statusMenu = StatusMenuController(actions: makeStatusMenuActions())
 
     private var settingsWindow: NSWindow?
+    private let settingsSelection = SettingsSelection()
     private var historyWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var clickOutsideMonitor: Any?
@@ -18,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Arrêt différé d'une dictée lancée depuis le menu, annulé si la dictée
     /// se termine avant : sinon il coupait la dictée d'après.
     private var menuRecordingTimeout: Task<Void, Never>?
+    /// Rafraîchit le pourcentage de téléchargement tant que le menu est ouvert
+    private var downloadRefreshTimer: Timer?
 
     /// Session de dictée en direct du moteur système, quand elle est activée
     private var liveSession: (any LiveDictationSession)?
@@ -196,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         hidePanelTask?.cancel()
         menuRecordingTimeout?.cancel()
+        downloadRefreshTimer?.invalidate()
 
         Permissions.shared.stopMonitoring()
         hotkeyManager?.stop()
@@ -229,9 +234,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             systemSymbolName: "waveform",
             accessibilityDescription: "Whispered"
         )
-        statusItem?.button?.action = #selector(statusItemClicked)
-        statusItem?.button?.target = self
-        statusItem?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+        // Menu attaché en permanence et rempli par `menuNeedsUpdate` : c'est
+        // AppKit qui l'ouvre, donc au mouse-down comme les autres extras de la
+        // barre des menus, avec le clic droit et la navigation clavier. La
+        // version précédente posait le menu, simulait un clic sur le bouton
+        // puis le détachait aussitôt, ce qui perdait les trois.
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem?.menu = menu
     }
 
     private func updateStatusIcon(recording: Bool) {
@@ -239,120 +250,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image = NSImage(systemSymbolName: name, accessibilityDescription: "Whispered")
     }
 
-    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
-        showMenu()
-    }
-
-    private func showMenu() {
-        let menu = NSMenu()
-
+    /// Tout ce que le menu affiche, relevé au moment de l'ouverture.
+    private func currentMenuState() -> StatusMenuController.State {
         let service = TranscriptionService.shared
-        let header = NSMenuItem(title: "Whispered", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let store = ModelStore.shared
+        let permissions = Permissions.shared
+        permissions.refresh()
 
-        let engineItem = NSMenuItem(
-            title: service.isReady
-                ? "Moteur : \(service.currentModel.displayName)"
-                : "Aucun modèle installé",
-            action: nil,
-            keyEquivalent: ""
+        // Trié : l'ordre d'un dictionnaire n'est pas spécifié, et le modèle
+        // nommé changeait d'une ouverture à l'autre avec deux téléchargements.
+        let download = store.progress
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .first
+            .map { StatusMenuController.Download(model: $0.value.model, fraction: $0.value.fraction) }
+
+        return StatusMenuController.State(
+            selectedModel: service.currentModel,
+            isModelInstalled: service.isReady,
+            installedModels: TranscriptionModel.allCases.filter { ModelStore.isInstalled($0) },
+            // Sans modèle local, le moteur du système prend le relais : c'est
+            // la même condition que dans `startRecording`.
+            canDictateWithoutModel: isLivePreviewEnabled,
+            isRecording: recordingState.isRecording,
+            isTranscribing: service.isTranscribing,
+            download: download,
+            missingAccessibility: !permissions.accessibility.isGranted,
+            missingMicrophone: !permissions.microphone.isGranted,
+            lastDictation: TranscriptionHistory.shared.mostRecent?.text
+                ?? (recordingState.lastTranscription.isEmpty ? nil : recordingState.lastTranscription),
+            language: selectedLanguage,
+            favoriteLanguages: FavoriteLanguagesManager.shared.favoriteLanguages,
+            insertionMode: insertionMode,
+            hotkeyDescription: currentHotkeyChoice.fullDescription
         )
-        engineItem.isEnabled = false
-        menu.addItem(engineItem)
-
-        menu.addItem(.separator())
-
-        let recordItem = NSMenuItem(
-            title: "Dicter (\(currentHotkeyChoice.fullDescription))",
-            action: #selector(startRecordingFromMenu),
-            keyEquivalent: ""
-        )
-        recordItem.target = self
-        recordItem.isEnabled = service.isReady
-        menu.addItem(recordItem)
-
-        if let last = TranscriptionHistory.shared.mostRecent {
-            let repeatItem = NSMenuItem(
-                title: "Réinsérer : \(last.preview)",
-                action: #selector(repeatLastFromMenu),
-                keyEquivalent: ""
-            )
-            repeatItem.target = self
-            menu.addItem(repeatItem)
-        }
-
-        let historyItem = NSMenuItem(
-            title: "Historique…",
-            action: #selector(openHistory),
-            keyEquivalent: "y"
-        )
-        historyItem.target = self
-        menu.addItem(historyItem)
-
-        menu.addItem(.separator())
-        addLanguageMenuItems(to: menu)
-        menu.addItem(.separator())
-
-        let settingsItem = NSMenuItem(
-            title: "Préférences…",
-            action: #selector(openSettings),
-            keyEquivalent: ","
-        )
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        statusItem?.menu = menu
-        statusItem?.button?.performClick(nil)
-        statusItem?.menu = nil
     }
 
-    /// Langues favorites et mode automatique.
-    /// Parakeet détecte la langue tout seul : le choix ne s'applique qu'à whisper.
-    private func addLanguageMenuItems(to menu: NSMenu) {
-        let supportsLanguage = TranscriptionService.shared.currentModel.supportsLanguageSelection
-        let title = supportsLanguage ? "Langue" : "Langue détectée automatiquement"
-        let langHeader = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        langHeader.isEnabled = false
-        menu.addItem(langHeader)
-
-        guard supportsLanguage else { return }
-
-        let current = selectedLanguage
-        for lang in FavoriteLanguagesManager.shared.favoriteLanguages {
-            let item = NSMenuItem(
-                title: lang.displayName,
-                action: #selector(selectLanguageFromMenu(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = lang.code
-            item.state = (current == lang.code) ? .on : .off
-            menu.addItem(item)
+    private func makeStatusMenuActions() -> StatusMenuController.Actions {
+        var actions = StatusMenuController.Actions()
+        actions.dictate = { [weak self] in self?.startRecordingFromMenu() }
+        actions.stopDictation = { [weak self] in
+            guard let self else { return }
+            self.isToggleRecordingActive = false
+            self.stopRecording()
         }
-
-        let autoItem = NSMenuItem(
-            title: Language.auto.displayName,
-            action: #selector(selectLanguageFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        autoItem.target = self
-        autoItem.representedObject = "auto"
-        autoItem.state = (current == "auto") ? .on : .off
-        menu.addItem(autoItem)
+        actions.repeatLast = { [weak self] in self?.repeatLastTranscription() }
+        actions.openHistory = { [weak self] in self?.openHistory() }
+        actions.openSettings = { [weak self] tab in self?.openSettings(tab: tab) }
+        actions.selectModel = { model in
+            TranscriptionService.shared.select(model: model)
+        }
+        actions.selectLanguage = { [weak self] code in
+            self?.selectLanguage(code)
+        }
+        actions.selectInsertionMode = { mode in
+            UserDefaults.standard.set(mode.rawValue, forKey: "insertionMode")
+        }
+        actions.openAccessibilitySettings = {
+            Permissions.shared.openAccessibilitySettings()
+        }
+        actions.openMicrophoneSettings = {
+            Permissions.shared.openMicrophoneSettings()
+        }
+        actions.quit = { [weak self] in self?.quit() }
+        return actions
     }
 
-    @objc private func selectLanguageFromMenu(_ sender: NSMenuItem) {
-        guard let code = sender.representedObject as? String else { return }
+    /// La notification suffit : l'AppDelegate l'observe lui-même et c'est la
+    /// voie commune avec les préférences. Appeler en plus le rafraîchissement
+    /// ici le déclenchait trois fois par clic.
+    private func selectLanguage(_ code: String) {
         selectedLanguage = code
         NotificationCenter.default.post(name: .selectedLanguageDidChange, object: code)
-        refreshLiveAudioFormat()
     }
 
     /// Le format attendu par le moteur système dépend de la locale : il doit
@@ -365,7 +333,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let language = selectedLanguage
         Task { [weak self] in
             let format = await AppleSpeechEngine.preferredAudioFormat(for: language)
-            self?.liveAudioFormat = format
+            // La langue a pu changer entre-temps : sans cette garde, une
+            // réponse tardive écrasait le format de la langue courante et la
+            // session en direct était abandonnée en silence.
+            guard let self, self.selectedLanguage == language else { return }
+            self.liveAudioFormat = format
         }
     }
 
@@ -582,7 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopRecording()
     }
 
-    @objc private func startRecordingFromMenu() {
+    private func startRecordingFromMenu() {
         activeRole = .primary
         if currentRecordingMode == .toggle {
             guard !isToggleRecordingActive else { return }
@@ -598,10 +570,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.stopRecording()
             }
         }
-    }
-
-    @objc private func repeatLastFromMenu() {
-        repeatLastTranscription()
     }
 
     // MARK: - Dictée
@@ -836,20 +804,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Fenêtres
 
-    @objc private func openSettings() {
+    private func openSettings() {
+        openSettings(tab: .general)
+    }
+
+    /// Ouvre les préférences sur un onglet précis. La fenêtre n'est créée
+    /// qu'une fois et l'onglet est piloté par un état observable partagé : la
+    /// recréer détruisait l'état SwiftUI, et une mise à jour en cours perdait
+    /// sa barre de progression tout en continuant à s'installer.
+    private func openSettings(tab: SettingsView.Tab) {
+        settingsSelection.tab = tab
+
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+            let window = NSWindow(
+                contentViewController: NSHostingController(
+                    rootView: SettingsView(selection: settingsSelection)
+                )
+            )
             window.title = "Préférences"
             window.styleMask = [.titled, .closable]
+            // Le défaut est `true` et libérerait la fenêtre à la fermeture,
+            // laissant `settingsWindow` pointer dans le vide.
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
-    @objc private func openHistory() {
+    private func openHistory() {
         if historyWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: HistoryView()))
             window.title = "Historique"
@@ -859,7 +843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             historyWindow = window
         }
         historyWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     private func showOnboarding() {
@@ -878,11 +862,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         onboardingWindow = window
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
-    @objc private func quit() {
+    private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+}
+
+// MARK: - Menu de la barre des menus
+
+extension AppDelegate: NSMenuDelegate {
+    /// AppKit demande le contenu juste avant l'ouverture : l'état affiché est
+    /// donc toujours frais, sans observateur à brancher.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        statusMenu.populate(menu, state: currentMenuState())
+    }
+
+    /// Le pourcentage de téléchargement doit bouger pendant que le menu est
+    /// ouvert, sinon l'utilisateur voit un chiffre figé et croit que c'est
+    /// bloqué. Le timer doit tourner en mode `eventTracking`, le seul actif
+    /// pendant le suivi d'un menu.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === statusItem?.menu, statusMenu.isShowingDownload else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let progress = ModelStore.shared.progress
+                    .sorted { $0.key.rawValue < $1.key.rawValue }
+                    .first
+                    .map { StatusMenuController.Download(model: $0.value.model, fraction: $0.value.fraction) }
+                self.statusMenu.refreshDownload(progress)
+            }
+        }
+        RunLoop.current.add(timer, forMode: .eventTracking)
+        downloadRefreshTimer = timer
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        downloadRefreshTimer?.invalidate()
+        downloadRefreshTimer = nil
     }
 }
 
@@ -904,10 +924,4 @@ struct VisualEffectBlur: NSViewRepresentable {
         nsView.material = material
         nsView.blendingMode = blendingMode
     }
-}
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let popupModeDidChange = Notification.Name("popupModeDidChange")
 }

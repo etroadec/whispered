@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Language Model
 
-/// Langues supportees par Whisper pour la transcription
+/// Langues disponibles pour la transcription
 struct Language: Identifiable, Hashable {
     let code: String
     let name: String
@@ -10,7 +10,7 @@ struct Language: Identifiable, Hashable {
     
     var id: String { code }
     
-    /// Nom avec emoji drapeau pour l'affichage
+    /// Nom précédé du drapeau, pour l'affichage
     var displayName: String {
         "\(flag) \(name)"
     }
@@ -19,9 +19,9 @@ struct Language: Identifiable, Hashable {
 // MARK: - Available Languages
 
 extension Language {
-    /// Toutes les langues disponibles (hors "auto")
+    /// Toutes les langues proposées, hors « automatique »
     static let allLanguages: [Language] = [
-        Language(code: "fr", name: "Francais", flag: "🇫🇷"),
+        Language(code: "fr", name: "Français", flag: "🇫🇷"),
         Language(code: "en", name: "Anglais", flag: "🇬🇧"),
         Language(code: "es", name: "Espagnol", flag: "🇪🇸"),
         Language(code: "de", name: "Allemand", flag: "🇩🇪"),
@@ -29,19 +29,19 @@ extension Language {
         Language(code: "pt", name: "Portugais", flag: "🇵🇹"),
         Language(code: "ja", name: "Japonais", flag: "🇯🇵"),
         Language(code: "zh", name: "Chinois", flag: "🇨🇳"),
-        Language(code: "nl", name: "Neerlandais", flag: "🇳🇱"),
+        Language(code: "nl", name: "Néerlandais", flag: "🇳🇱"),
         Language(code: "pl", name: "Polonais", flag: "🇵🇱"),
         Language(code: "ru", name: "Russe", flag: "🇷🇺"),
-        Language(code: "ko", name: "Coreen", flag: "🇰🇷"),
+        Language(code: "ko", name: "Coréen", flag: "🇰🇷"),
         Language(code: "ar", name: "Arabe", flag: "🇸🇦"),
     ]
     
-    /// Trouver une langue par son code
+    /// Retrouve une langue par son code ISO
     static func byCode(_ code: String) -> Language? {
         allLanguages.first { $0.code == code }
     }
     
-    /// Option "Automatique" speciale
+    /// Détection automatique par le moteur
     static let auto = Language(code: "auto", name: "Automatique", flag: "🌐")
 }
 
@@ -50,35 +50,32 @@ extension Language {
 /// Langues favorites, rangées dans `UserDefaults`.
 ///
 /// `@unchecked Sendable` : la seule donnée est dans `UserDefaults`, lui-même
-/// thread-safe ; l'objet n'a aucun état propre.
+/// thread-safe ; l'objet n'a aucun état propre. Pas de file de synchronisation
+/// non plus — elle n'ajoutait rien et faisait bloquer le main thread à chaque
+/// ouverture du menu si une écriture était en vol.
 final class FavoriteLanguagesManager: @unchecked Sendable {
     static let shared = FavoriteLanguagesManager()
 
     private let favoritesKey = "favoriteLanguages"
     private let maxFavorites = 2
-    private let queue = DispatchQueue(label: "com.whispered.favorites", attributes: .concurrent)
 
     private init() {}
 
-    /// Langues favorites (max 2) - thread-safe
+    /// Langues favorites, deux au maximum
     var favorites: [String] {
         get {
-            queue.sync {
                 let stored = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
                 return Array(stored.filter { code in
                     Language.allLanguages.contains { $0.code == code }
                 }.prefix(maxFavorites))
-            }
         }
         set {
-            queue.async(flags: .barrier) { [self] in
                 let validCodes = newValue.filter { code in
                     Language.allLanguages.contains { $0.code == code }
                 }
                 let limited = Array(validCodes.prefix(maxFavorites))
                 UserDefaults.standard.set(limited, forKey: favoritesKey)
                 postNotificationOnMainThread(.favoriteLanguagesDidChange)
-            }
         }
     }
 
@@ -87,58 +84,52 @@ final class FavoriteLanguagesManager: @unchecked Sendable {
         favorites.compactMap { Language.byCode($0) }
     }
 
-    /// Ajouter une langue aux favoris - thread-safe
+    /// Ajouter une langue aux favoris
     func addFavorite(_ code: String) {
-        queue.async(flags: .barrier) { [self] in
-            var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
-            current = current.filter { c in Language.allLanguages.contains { $0.code == c } }
+        var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
+        current = current.filter { c in Language.allLanguages.contains { $0.code == c } }
 
-            guard !current.contains(code) else { return }
-            if current.count >= maxFavorites {
-                current.removeLast()
-            }
-            current.append(code)
-
-            let limited = Array(current.prefix(maxFavorites))
-            UserDefaults.standard.set(limited, forKey: favoritesKey)
-            postNotificationOnMainThread(.favoriteLanguagesDidChange)
+        guard !current.contains(code) else { return }
+        if current.count >= maxFavorites {
+            current.removeLast()
         }
+        current.append(code)
+
+        let limited = Array(current.prefix(maxFavorites))
+        UserDefaults.standard.set(limited, forKey: favoritesKey)
+        postNotificationOnMainThread(.favoriteLanguagesDidChange)
     }
 
-    /// Retirer une langue des favoris - thread-safe
+    /// Retirer une langue des favoris
     func removeFavorite(_ code: String) {
-        queue.async(flags: .barrier) { [self] in
-            var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
-            current = current.filter { $0 != code }
-            UserDefaults.standard.set(current, forKey: favoritesKey)
-            postNotificationOnMainThread(.favoriteLanguagesDidChange)
-        }
+        var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
+        current = current.filter { $0 != code }
+        UserDefaults.standard.set(current, forKey: favoritesKey)
+        postNotificationOnMainThread(.favoriteLanguagesDidChange)
     }
 
-    /// Verifier si une langue est favorite
+    /// Une langue est-elle dans les favoris
     func isFavorite(_ code: String) -> Bool {
         favorites.contains(code)
     }
 
-    /// Toggle une langue dans les favoris
+    /// Ajoute ou retire une langue des favoris
     func toggleFavorite(_ code: String) {
-        queue.async(flags: .barrier) { [self] in
-            var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
-            current = current.filter { c in Language.allLanguages.contains { $0.code == c } }
+        var current = UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []
+        current = current.filter { c in Language.allLanguages.contains { $0.code == c } }
 
-            if current.contains(code) {
-                current = current.filter { $0 != code }
-            } else {
-                if current.count >= maxFavorites {
-                    current.removeLast()
-                }
-                current.append(code)
+        if current.contains(code) {
+            current = current.filter { $0 != code }
+        } else {
+            if current.count >= maxFavorites {
+                current.removeLast()
             }
-
-            let limited = Array(current.prefix(maxFavorites))
-            UserDefaults.standard.set(limited, forKey: favoritesKey)
-            postNotificationOnMainThread(.favoriteLanguagesDidChange)
+            current.append(code)
         }
+
+        let limited = Array(current.prefix(maxFavorites))
+        UserDefaults.standard.set(limited, forKey: favoritesKey)
+        postNotificationOnMainThread(.favoriteLanguagesDidChange)
     }
 
     /// Poster une notification sur le main thread
