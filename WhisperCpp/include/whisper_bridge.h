@@ -5,5 +5,6 @@
 #include "ggml-cpu.h"
 #include "ggml-backend.h"
 #include "whisper.h"
+#include "parakeet.h"
 
 #endif /* WHISPER_BRIDGE_H */

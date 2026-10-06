@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -15,7 +15,10 @@ let package = Package(
             dependencies: ["CWhisper"],
             path: "Whispered",
             swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
+                .unsafeFlags(["-parse-as-library"]),
+                // Mode strict : les annotations de concurrence sont vérifiées par
+                // le compilateur, pas seulement écrites en commentaire.
+                .swiftLanguageMode(.v6)
             ],
             linkerSettings: [
                 .linkedFramework("Accelerate"),
@@ -23,10 +26,9 @@ let package = Package(
                 .linkedFramework("MetalKit"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreAudio"),
-                .linkedFramework("CoreML"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Foundation"),
-                .unsafeFlags(["-Llib", "-lwhisper", "-lwhisper.coreml", "-lggml", "-lggml-base", "-lggml-cpu", "-lggml-metal", "-lggml-blas", "-lc++"])
+                .unsafeFlags(["-Llib", "-lwhisper", "-lparakeet", "-lggml", "-lggml-base", "-lggml-cpu", "-lggml-metal", "-lggml-blas", "-lc++"])
             ]
         ),
         .systemLibrary(
