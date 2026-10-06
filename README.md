@@ -286,6 +286,11 @@ L'application des utilisateurs détectera automatiquement la nouvelle version.
 
 ## Changelog
 
+### v2.0.1
+
+**Correction :**
+- **L'application plantait au démarrage de la dictée.** En Swift 6, une fermeture non `@Sendable` créée dans une méthode `@MainActor` hérite de l'isolation du main actor ; `AVAudioNodeTapBlock` n'étant pas annoté, le bloc de tap audio vérifiait l'exécuteur courant à chaque bloc reçu depuis le thread temps réel et abandonnait le processus (`dispatch_assert_queue`, SIGTRAP). Le bloc est désormais explicitement `@Sendable`, donc détaché de l'acteur.
+
 ### v2.0.0
 
 **Moteur :**

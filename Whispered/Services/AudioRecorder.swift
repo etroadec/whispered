@@ -302,7 +302,15 @@ final class AudioRecorder {
 
         // 4096 trames ≈ 85 ms à 48 kHz : assez pour amortir la conversion, assez
         // peu pour que le niveau affiché reste réactif.
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        // `@Sendable` n'est pas décoratif ici : `AVAudioNodeTapBlock` n'est pas
+        // déclaré Sendable, donc une fermeture créée dans cette méthode
+        // `@MainActor` **hérite de l'isolation du main actor**. Le bloc est
+        // appelé depuis le thread audio temps réel : en Swift 6, le runtime y
+        // vérifie l'exécuteur courant et abandonne le processus
+        // (`dispatch_assert_queue` → SIGTRAP). `@Sendable` détache la fermeture
+        // de l'acteur, ce qui est correct puisqu'elle ne touche que des valeurs
+        // immuables et le tampon verrouillé.
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable buffer, _ in
             Self.convert(buffer: buffer, with: converter, to: target, into: sink)
             if let live, live.box.isAttached,
                let converted = Self.convert(buffer: buffer, with: live.converter, to: live.format) {
